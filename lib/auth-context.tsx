@@ -121,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Session restoration + auth state listener ──────────────────────
   useEffect(() => {
     let mounted = true;
+    let initialRestoreDone = false;
 
     // 1. Check for an existing session on mount
     async function restoreSession() {
@@ -133,8 +134,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const profile = await fetchProfileById(session.user.id);
           if (mounted) setUser(profile);
         }
+      } catch (err) {
+        console.error("[Auth] restoreSession error:", err);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          initialRestoreDone = true;
+        }
       }
     }
 
@@ -146,14 +152,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
+      // Skip events during initial restore to prevent race condition
+      if (!initialRestoreDone && event === "INITIAL_SESSION") return;
+
       if (event === "SIGNED_OUT" || !session?.user) {
+        // Gracefully clear user — they'll see login page, not stuck spinner
         setUser(null);
+        setLoading(false);
         return;
       }
 
-      // SIGNED_IN, TOKEN_REFRESHED, etc.
-      const profile = await fetchProfileById(session.user.id);
-      if (mounted) setUser(profile);
+      // SIGNED_IN, TOKEN_REFRESHED — only fetch profile after initial restore
+      if (initialRestoreDone) {
+        const profile = await fetchProfileById(session.user.id);
+        if (mounted) setUser(profile);
+      }
     });
 
     return () => {

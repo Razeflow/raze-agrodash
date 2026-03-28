@@ -88,7 +88,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         if (farmersRes.data) {
           setFarmers(farmersRes.data);
         }
-      } catch { /* empty */ }
+      } catch (err) { console.error("[AgriData] fetch error:", err); }
       if (!cancelled) setLoaded(true);
     }
 
