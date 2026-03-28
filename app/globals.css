@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg: #f0f4f0;
+  --surface: #ffffff;
+  --surface-2: #f7faf7;
+  --border: #d4e4d4;
+  --text: #1a2e1a;
+  --text-muted: #5a7a5a;
+  --accent-green: #16a34a;
+  --accent-gold: #ca8a04;
+  --accent-blue: #0284c7;
+  --accent-purple: #9333ea;
+  --accent-orange: #ea580c;
+  --accent-red: #dc2626;
+  --font-body: "DM Sans", sans-serif;
+  --font-mono: "Space Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #b6d4b6; border-radius: 3px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.4s ease both; }
+.delay-1 { animation-delay: 0.06s; }
+.delay-2 { animation-delay: 0.12s; }
+.delay-3 { animation-delay: 0.18s; }
+.delay-4 { animation-delay: 0.24s; }
+.delay-5 { animation-delay: 0.30s; }
