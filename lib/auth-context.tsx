@@ -69,7 +69,14 @@ async function fetchProfileById(
     .eq("id", authId)
     .single();
 
-  if (error || !data) return null;
+  if (error) {
+    console.error("[Auth] fetchProfileById error:", error.message, error.code);
+    return null;
+  }
+  if (!data) {
+    console.error("[Auth] fetchProfileById: no profile row found for id", authId);
+    return null;
+  }
 
   return {
     id: data.id,
@@ -88,7 +95,11 @@ async function fetchAllProfiles(): Promise<
     .from("profiles")
     .select("username, display_name, role, barangay");
 
-  if (error || !data) return [];
+  if (error) {
+    console.error("[Auth] fetchAllProfiles error:", error.message, error.code);
+    return [];
+  }
+  if (!data) return [];
 
   return data.map((row) => ({
     username: row.username,
@@ -170,10 +181,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
 
-      if (error || !data.user) return false;
+      if (error) {
+        console.error("[Auth] Login failed:", error.message, error.status);
+        return false;
+      }
+      if (!data.user) {
+        console.error("[Auth] Login: no user returned");
+        return false;
+      }
 
       const profile = await fetchProfileById(data.user.id);
-      if (!profile) return false;
+      if (!profile) {
+        console.error("[Auth] Login: profile fetch failed for user", data.user.id);
+        return false;
+      }
 
       setUser(profile);
       return true;
@@ -262,10 +283,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user, login, logout, changePassword, resetUserPassword, allUsers],
   );
 
-  // While the session check is in-flight, render children with user=null
-  // so the login page can still display.
+  // While the session check is in-flight, show a loading spinner
   if (loading) {
-    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+    return (
+      <AuthContext.Provider value={value}>
+        <div className="flex h-screen w-screen items-center justify-center bg-gray-50">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-green-200 border-t-green-600" />
+            <p className="text-sm text-gray-500">Loading...</p>
+          </div>
+        </div>
+      </AuthContext.Provider>
+    );
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
