@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
-import { X, Users, CheckCircle2 } from "lucide-react";
+import { X, Users, CheckCircle2, AlertCircle } from "lucide-react";
 import type { AgriRecord } from "@/lib/data";
-import { BARANGAYS, COMMODITY_OPTIONS, SUB_TYPES } from "@/lib/data";
+import { BARANGAYS, COMMODITY_OPTIONS, SUB_TYPES, getCurrentPHPeriod, MONTH_NAMES } from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import FarmerSelectDialog from "./FarmerSelectDialog";
@@ -15,39 +15,56 @@ type Props = {
   defaultBarangay?: string;
 };
 
-const emptyForm = {
-  barangay: BARANGAYS[0] as string,
-  commodity: "Rice" as AgriRecord["commodity"],
-  sub_category: "Hybrid",
-  farmer_ids: [] as string[],
-  planting_area_hectares: 0,
-  harvesting_output_bags: 0,
-  damage_pests_hectares: 0,
-  damage_calamity_hectares: 0,
-  stocking: 0,
-  harvesting_fishery: 0,
-  pests_diseases: "None",
-  calamity: "None",
-  remarks: "",
+type FormErrors = {
+  commodity?: string;
+  farmer_ids?: string;
+  period?: string;
 };
+
+function getEmptyForm() {
+  const { month, year } = getCurrentPHPeriod();
+  return {
+    barangay: BARANGAYS[0] as string,
+    commodity: "Rice" as AgriRecord["commodity"],
+    sub_category: "Hybrid",
+    farmer_ids: [] as string[],
+    period_month: month,
+    period_year: year,
+    planting_area_hectares: 0,
+    harvesting_output_bags: 0,
+    damage_pests_hectares: 0,
+    damage_calamity_hectares: 0,
+    stocking: 0,
+    harvesting_fishery: 0,
+    pests_diseases: "None",
+    calamity: "None",
+    remarks: "",
+  };
+}
 
 export default function RecordFormDialog({ open, onClose, mode, initialData, defaultBarangay }: Props) {
   const { addRecord, updateRecord, getFarmersByIds } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
   const availableBarangays = isBarangayUser && userBarangay ? [userBarangay] : BARANGAYS;
-  const [form, setForm] = useState({ ...emptyForm });
+  const [form, setForm] = useState(getEmptyForm());
   const [farmerSelectOpen, setFarmerSelectOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     if (open) {
       setSuccessMsg(null);
+      setErrors({});
+      setSubmitted(false);
       if (mode === "edit" && initialData) {
         setForm({
           barangay: initialData.barangay,
           commodity: initialData.commodity,
           sub_category: initialData.sub_category,
           farmer_ids: initialData.farmer_ids || [],
+          period_month: initialData.period_month || getCurrentPHPeriod().month,
+          period_year: initialData.period_year || getCurrentPHPeriod().year,
           planting_area_hectares: initialData.planting_area_hectares,
           harvesting_output_bags: initialData.harvesting_output_bags,
           damage_pests_hectares: initialData.damage_pests_hectares,
@@ -59,10 +76,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           remarks: initialData.remarks,
         });
       } else {
-        setForm({ ...emptyForm, barangay: defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]) });
+        const empty = getEmptyForm();
+        setForm({ ...empty, barangay: defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]) });
       }
     }
-  }, [open, mode, initialData, defaultBarangay]);
+  }, [open, mode, initialData, defaultBarangay, isBarangayUser, userBarangay]);
 
   if (!open) return null;
 
@@ -70,6 +88,18 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
   const isCorn = form.commodity === "Corn";
   const subTypes = SUB_TYPES[form.commodity] || [];
   const linkedFarmers = getFarmersByIds(form.farmer_ids);
+
+  // Generate year options (current PH year -2 to +1)
+  const { year: currentYear } = getCurrentPHPeriod();
+  const yearOptions = Array.from({ length: 4 }, (_, i) => currentYear - 2 + i);
+
+  function validate(): FormErrors {
+    const errs: FormErrors = {};
+    if (!form.commodity) errs.commodity = "Commodity is required";
+    if (form.farmer_ids.length === 0) errs.farmer_ids = "At least one farmer/fisherfolk must be selected";
+    if (!form.period_month || !form.period_year) errs.period = "Reporting period is required";
+    return errs;
+  }
 
   function handleCommodityChange(commodity: AgriRecord["commodity"]) {
     const subs = SUB_TYPES[commodity] || [];
@@ -84,14 +114,22 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       stocking: commodity === "Fishery" ? f.stocking : 0,
       harvesting_fishery: commodity === "Fishery" ? f.harvesting_fishery : 0,
     }));
+    if (submitted) setErrors((e) => ({ ...e, commodity: undefined }));
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSubmitted(true);
+    const errs = validate();
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     const data = {
       ...form,
       sub_category: isCorn ? "Corn" : form.sub_category,
       farmer_ids: form.farmer_ids,
+      period_month: form.period_month,
+      period_year: form.period_year,
     };
     if (mode === "edit" && initialData) {
       updateRecord(initialData.id, data);
@@ -99,13 +137,18 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     } else {
       addRecord(data);
       setSuccessMsg("Record added successfully!");
-      setForm({ ...emptyForm, barangay: form.barangay });
+      const empty = getEmptyForm();
+      setForm({ ...empty, barangay: form.barangay });
+      setErrors({});
+      setSubmitted(false);
       setTimeout(() => setSuccessMsg(null), 1500);
     }
   }
 
   const inputCls = "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 outline-none focus:border-green-400 focus:bg-white transition";
+  const inputErrCls = "w-full rounded-lg border border-red-300 bg-red-50/30 px-3 py-2 text-sm text-gray-700 outline-none focus:border-red-400 focus:bg-white transition";
   const labelCls = "block text-xs font-semibold text-gray-500 mb-1";
+  const errTextCls = "text-[11px] text-red-500 mt-1 flex items-center gap-1";
 
   return (
     <>
@@ -127,11 +170,42 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             </div>
           )}
 
+          {submitted && Object.keys(errors).length > 0 && (
+            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-2.5 text-sm font-medium text-red-600 flex items-center gap-2">
+              <AlertCircle size={16} /> Please fix the errors below before submitting.
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Reporting Period */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Reporting Month <span className="text-red-400">*</span></label>
+                <select
+                  className={errors.period ? inputErrCls : inputCls}
+                  value={form.period_month}
+                  onChange={(e) => { setForm((f) => ({ ...f, period_month: parseInt(e.target.value) })); if (submitted) setErrors((er) => ({ ...er, period: undefined })); }}
+                >
+                  {MONTH_NAMES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Reporting Year <span className="text-red-400">*</span></label>
+                <select
+                  className={errors.period ? inputErrCls : inputCls}
+                  value={form.period_year}
+                  onChange={(e) => { setForm((f) => ({ ...f, period_year: parseInt(e.target.value) })); if (submitted) setErrors((er) => ({ ...er, period: undefined })); }}
+                >
+                  {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+                {errors.period && <p className={errTextCls}><AlertCircle size={11} /> {errors.period}</p>}
+              </div>
+            </div>
+
             {/* Barangay + Commodity */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className={labelCls}>Barangay</label>
+                <label className={labelCls}>Barangay <span className="text-red-400">*</span></label>
                 {isBarangayUser ? (
                   <div className={inputCls + " flex items-center gap-2 bg-gray-100 cursor-not-allowed"}>
                     <span className="text-gray-700 font-medium">{userBarangay}</span>
@@ -144,10 +218,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                 )}
               </div>
               <div>
-                <label className={labelCls}>Commodity</label>
-                <select className={inputCls} value={form.commodity} onChange={(e) => handleCommodityChange(e.target.value as AgriRecord["commodity"])}>
+                <label className={labelCls}>Commodity <span className="text-red-400">*</span></label>
+                <select className={errors.commodity ? inputErrCls : inputCls} value={form.commodity} onChange={(e) => handleCommodityChange(e.target.value as AgriRecord["commodity"])}>
                   {COMMODITY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
+                {errors.commodity && <p className={errTextCls}><AlertCircle size={11} /> {errors.commodity}</p>}
               </div>
             </div>
 
@@ -163,23 +238,28 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
             {/* Farmer Selection */}
             <div>
-              <label className={labelCls}>Farmers / Fisherfolks</label>
+              <label className={labelCls}>Farmers / Fisherfolks <span className="text-red-400">*</span></label>
               <button
                 type="button"
                 onClick={() => setFarmerSelectOpen(true)}
-                className="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 hover:bg-white hover:border-green-400 transition"
+                className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                  errors.farmer_ids
+                    ? "border-red-300 bg-red-50/30 text-red-500 hover:border-red-400"
+                    : "border-gray-200 bg-gray-50 text-gray-500 hover:bg-white hover:border-green-400"
+                }`}
               >
-                <Users size={14} className="text-gray-400" />
+                <Users size={14} className={errors.farmer_ids ? "text-red-400" : "text-gray-400"} />
                 {linkedFarmers.length > 0
                   ? <span className="text-gray-700">{linkedFarmers.length} farmer{linkedFarmers.length !== 1 ? "s" : ""} selected</span>
-                  : <span>Select farmers from registry...</span>}
+                  : <span>{errors.farmer_ids ? "⚠ No farmers selected" : "Select farmers from registry..."}</span>}
               </button>
+              {errors.farmer_ids && <p className={errTextCls}><AlertCircle size={11} /> {errors.farmer_ids}</p>}
               {linkedFarmers.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {linkedFarmers.map((f) => (
                     <span key={f.id} className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${f.gender === "Male" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-500"}`}>
                       {f.name}
-                      <button type="button" onClick={() => setForm((prev) => ({ ...prev, farmer_ids: prev.farmer_ids.filter((id) => id !== f.id) }))} className="ml-1 hover:text-red-500">
+                      <button type="button" onClick={() => { setForm((prev) => ({ ...prev, farmer_ids: prev.farmer_ids.filter((id) => id !== f.id) })); if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined })); }} className="ml-1 hover:text-red-500">
                         <X size={10} />
                       </button>
                     </span>
@@ -262,7 +342,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
         onClose={() => setFarmerSelectOpen(false)}
         barangay={form.barangay}
         selectedIds={form.farmer_ids}
-        onConfirm={(ids) => setForm((f) => ({ ...f, farmer_ids: ids }))}
+        onConfirm={(ids) => { setForm((f) => ({ ...f, farmer_ids: ids })); if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined })); }}
       />
     </>
   );

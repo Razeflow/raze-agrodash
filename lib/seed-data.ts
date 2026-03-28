@@ -134,6 +134,8 @@ function generateRecords(barangay: string, farmerPool: Farmer[]): AgriRecord[] {
         pests_diseases: !isFishery && hasDamage ? pick(PESTS) : "None",
         calamity: !isFishery && hasDamage && Math.random() < 0.4 ? pick(CALAMITIES.filter((c) => c !== "None")) : "None",
         remarks: "",
+        period_month: new Date(ts).getMonth() + 1,
+        period_year: new Date(ts).getFullYear(),
         created_at: ts,
         updated_at: ts,
       });

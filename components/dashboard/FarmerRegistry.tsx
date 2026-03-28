@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
-import { BARANGAYS } from "@/lib/data";
+import { BARANGAYS, formatDatePH, formatPeriod } from "@/lib/data";
 import type { Farmer } from "@/lib/data";
 import {
   Search, UserPlus, Pencil, Trash2, MapPin, Users, X,
@@ -11,7 +11,7 @@ import {
 import FarmerFormDialog from "./FarmerFormDialog";
 
 export default function FarmerRegistry() {
-  const { farmers, farmersByBarangay, deleteFarmer } = useAgriData();
+  const { farmers, farmersByBarangay, deleteFarmer, records } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
 
   // ── Global filters ──
@@ -278,6 +278,29 @@ export default function FarmerRegistry() {
                     ))}
                   </div>
 
+                  {/* Linked commodity records */}
+                  {(() => {
+                    const linked = records.filter((r) => r.farmer_ids?.includes(selectedFarmer.id));
+                    return (
+                      <div className="pt-1">
+                        <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-2">Linked Records ({linked.length})</p>
+                        {linked.length === 0 ? (
+                          <p className="text-xs text-gray-400 italic">No linked commodity records</p>
+                        ) : (
+                          <div className="space-y-1.5 max-h-[120px] overflow-y-auto">
+                            {linked.map((r) => (
+                              <div key={r.id} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
+                                <span className="h-2 w-2 rounded-full" style={{ background: r.commodity === "Rice" ? "#16a34a" : r.commodity === "Corn" ? "#ca8a04" : r.commodity === "Fishery" ? "#0284c7" : r.commodity === "High Value Crops" ? "#9333ea" : "#ea580c" }} />
+                                <span className="font-medium text-gray-700">{r.commodity} — {r.sub_category}</span>
+                                <span className="ml-auto text-gray-400">{formatPeriod(r.period_month, r.period_year)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* Action buttons */}
                   <div className="flex gap-3 pt-2">
                     <button
@@ -340,7 +363,7 @@ export default function FarmerRegistry() {
                               {f.gender}
                             </span>
                             <span className="text-[10px] text-gray-400">
-                              {new Date(f.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              {formatDatePH(f.created_at, { month: "short", day: "numeric", year: "numeric" })}
                             </span>
                           </div>
                         </div>

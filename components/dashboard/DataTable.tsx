@@ -1,9 +1,9 @@
 "use client";
 import { useState, useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
-import { COMMODITY_COLORS } from "@/lib/data";
+import { COMMODITY_COLORS, formatPeriod, MONTH_NAMES } from "@/lib/data";
 import type { AgriRecord } from "@/lib/data";
-import { Search, Filter, Plus, Pencil, Trash2 } from "lucide-react";
+import { Search, Filter, Plus, Pencil, Trash2, CalendarDays } from "lucide-react";
 import RecordFormDialog from "./RecordFormDialog";
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
 
@@ -29,6 +29,7 @@ export default function DataTable() {
   const { records } = useAgriData();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
+  const [periodFilter, setPeriodFilter] = useState("All");
   const [page, setPage] = useState(1);
   const PER_PAGE = 12;
 
@@ -39,9 +40,29 @@ export default function DataTable() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AgriRecord | null>(null);
 
+  // Period filter options
+  const periodOptions = useMemo(() => {
+    const seen = new Map<string, { month: number; year: number }>();
+    for (const r of records) {
+      if (r.period_month != null && r.period_year != null) {
+        const key = `${r.period_year}-${String(r.period_month).padStart(2, "0")}`;
+        if (!seen.has(key)) seen.set(key, { month: r.period_month, year: r.period_year });
+      }
+    }
+    return Array.from(seen.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, { month, year }]) => ({
+        key, label: `${MONTH_NAMES[month - 1]} ${year}`, month, year,
+      }));
+  }, [records]);
+
   const filtered = useMemo(() => {
     return records.filter((r) => {
       const matchCom = filter === "All" || r.commodity === filter;
+      const matchPeriod = periodFilter === "All" || (
+        r.period_month != null && r.period_year != null &&
+        periodFilter === `${r.period_year}-${String(r.period_month).padStart(2, "0")}`
+      );
       const q = search.toLowerCase();
       const matchSearch =
         !q ||
@@ -50,29 +71,16 @@ export default function DataTable() {
         r.sub_category.toLowerCase().includes(q) ||
         r.pests_diseases.toLowerCase().includes(q) ||
         r.calamity.toLowerCase().includes(q);
-      return matchCom && matchSearch;
+      return matchCom && matchPeriod && matchSearch;
     });
-  }, [records, search, filter]);
+  }, [records, search, filter, periodFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  function openAdd() {
-    setFormMode("add");
-    setEditRecord(undefined);
-    setFormOpen(true);
-  }
-
-  function openEdit(r: AgriRecord) {
-    setFormMode("edit");
-    setEditRecord(r);
-    setFormOpen(true);
-  }
-
-  function openDelete(r: AgriRecord) {
-    setDeleteTarget(r);
-    setDeleteOpen(true);
-  }
+  function openAdd() { setFormMode("add"); setEditRecord(undefined); setFormOpen(true); }
+  function openEdit(r: AgriRecord) { setFormMode("edit"); setEditRecord(r); setFormOpen(true); }
+  function openDelete(r: AgriRecord) { setDeleteTarget(r); setDeleteOpen(true); }
 
   return (
     <>
@@ -80,13 +88,10 @@ export default function DataTable() {
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-50 p-5">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-widest text-gray-400">
-              Agricultural Records
-            </h2>
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-gray-400">Agricultural Records</h2>
             <p className="text-xs text-gray-400">{filtered.length} records</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Search */}
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -96,7 +101,7 @@ export default function DataTable() {
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               />
             </div>
-            {/* Filter */}
+            {/* Commodity filter */}
             <div className="relative">
               <Filter size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <select
@@ -107,7 +112,18 @@ export default function DataTable() {
                 {COMMODITIES.map((c) => <option key={c}>{c}</option>)}
               </select>
             </div>
-            {/* Add button */}
+            {/* Period filter */}
+            <div className="relative">
+              <CalendarDays size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                className="h-8 appearance-none rounded-full border border-gray-200 bg-gray-50 pl-8 pr-6 text-xs text-gray-700 outline-none focus:border-green-400 focus:bg-white transition"
+                value={periodFilter}
+                onChange={(e) => { setPeriodFilter(e.target.value); setPage(1); }}
+              >
+                <option value="All">All Periods</option>
+                {periodOptions.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+            </div>
             <button
               onClick={openAdd}
               className="flex items-center gap-1.5 rounded-full bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition"
@@ -128,7 +144,7 @@ export default function DataTable() {
               <table className="w-full text-left">
                 <thead>
                   <tr>
-                    {["Barangay","Commodity","Sub-category","Male","Female","Total","Area (ha)","Harvest (bags)","Damage (ha)","Pests / Diseases","Calamity",""].map((h) => (
+                    {["Barangay","Period","Commodity","Sub-category","Male","Female","Total","Area (ha)","Harvest (bags)","Damage (ha)","Pests / Diseases","Calamity",""].map((h) => (
                       <th key={h} className="whitespace-nowrap bg-gray-50 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
                         {h}
                       </th>
@@ -144,6 +160,9 @@ export default function DataTable() {
                         className={`border-b border-gray-50 transition-colors hover:bg-green-50/40 ${i % 2 === 0 ? "bg-white" : "bg-gray-50/30"}`}
                       >
                         <td className="px-3 py-2.5 text-xs font-medium text-gray-700 whitespace-nowrap">{r.barangay}</td>
+                        <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
+                          {formatPeriod(r.period_month, r.period_year)}
+                        </td>
                         <td className="px-3 py-2.5 whitespace-nowrap"><CommodityBadge name={r.commodity} /></td>
                         <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{r.sub_category}</td>
                         <td className="px-3 py-2.5 text-xs font-mono text-blue-600 text-right">{r.farmer_male}</td>
@@ -213,7 +232,6 @@ export default function DataTable() {
         )}
       </div>
 
-      {/* Dialogs */}
       <RecordFormDialog open={formOpen} onClose={() => setFormOpen(false)} mode={formMode} initialData={editRecord} />
       <DeleteConfirmDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} record={deleteTarget} />
     </>
