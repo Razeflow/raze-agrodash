@@ -277,7 +277,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                     <input type="number" min={0} step="0.01" className={inputCls} value={form.planting_area_hectares || ""} onChange={(e) => setForm((f) => ({ ...f, planting_area_hectares: parseFloat(e.target.value) || 0 }))} />
                   </div>
                   <div>
-                    <label className={labelCls}>Harvest Output (bags)</label>
+                    <label className={labelCls}>Harvest Output (bags @ 40kg)</label>
                     <input type="number" min={0} step="0.01" className={inputCls} value={form.harvesting_output_bags || ""} onChange={(e) => setForm((f) => ({ ...f, harvesting_output_bags: parseFloat(e.target.value) || 0 }))} />
                   </div>
                 </div>

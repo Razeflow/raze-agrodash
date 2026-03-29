@@ -23,7 +23,7 @@ export default function KpiCards() {
     {
       label: "Total Production",
       value: `${totalProduction.tons.toLocaleString()} MT`,
-      sub: `${totalProduction.bags.toLocaleString()} bags`,
+      sub: `${totalProduction.bags.toLocaleString()} bags (40 kg/bag)`,
       icon: Wheat,
       color: "#ca8a04",
       bg: "#fefce8",
