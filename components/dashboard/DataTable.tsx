@@ -1,9 +1,9 @@
 "use client";
 import { useState, useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
-import { COMMODITY_COLORS, formatPeriod, MONTH_NAMES } from "@/lib/data";
+import { COMMODITY_COLORS, formatPeriod, MONTH_NAMES, BARANGAYS } from "@/lib/data";
 import type { AgriRecord } from "@/lib/data";
-import { Search, Filter, Plus, Pencil, Trash2, CalendarDays } from "lucide-react";
+import { Search, Filter, Plus, Pencil, Trash2, CalendarDays, MapPin } from "lucide-react";
 import RecordFormDialog from "./RecordFormDialog";
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
 
@@ -30,6 +30,7 @@ export default function DataTable() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("All");
+  const [barangayFilter, setBarangayFilter] = useState("All");
   const [page, setPage] = useState(1);
   const PER_PAGE = 12;
 
@@ -59,6 +60,7 @@ export default function DataTable() {
   const filtered = useMemo(() => {
     return records.filter((r) => {
       const matchCom = filter === "All" || r.commodity === filter;
+      const matchBarangay = barangayFilter === "All" || r.barangay === barangayFilter;
       const matchPeriod = periodFilter === "All" || (
         r.period_month != null && r.period_year != null &&
         periodFilter === `${r.period_year}-${String(r.period_month).padStart(2, "0")}`
@@ -71,9 +73,9 @@ export default function DataTable() {
         r.sub_category.toLowerCase().includes(q) ||
         r.pests_diseases.toLowerCase().includes(q) ||
         r.calamity.toLowerCase().includes(q);
-      return matchCom && matchPeriod && matchSearch;
+      return matchCom && matchBarangay && matchPeriod && matchSearch;
     });
-  }, [records, search, filter, periodFilter]);
+  }, [records, search, filter, barangayFilter, periodFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -110,6 +112,18 @@ export default function DataTable() {
                 onChange={(e) => { setFilter(e.target.value); setPage(1); }}
               >
                 {COMMODITIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            {/* Barangay filter */}
+            <div className="relative">
+              <MapPin size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                className="h-8 appearance-none rounded-full border border-gray-200 bg-gray-50 pl-8 pr-6 text-xs text-gray-700 outline-none focus:border-green-400 focus:bg-white transition"
+                value={barangayFilter}
+                onChange={(e) => { setBarangayFilter(e.target.value); setPage(1); }}
+              >
+                <option value="All">All Barangays</option>
+                {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
             </div>
             {/* Period filter */}

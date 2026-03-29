@@ -238,10 +238,10 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }, [vf]);
 
   const totalFarmers = useMemo(() => {
-    const male = vr.reduce((s, r) => s + r.farmer_male, 0);
-    const female = vr.reduce((s, r) => s + r.farmer_female, 0);
-    return { male, female, total: male + female };
-  }, [vr]);
+    const male = vf.filter((f) => f.gender === "Male").length;
+    const female = vf.filter((f) => f.gender === "Female").length;
+    return { male, female, total: vf.length };
+  }, [vf]);
 
   const totalProduction = useMemo(() => {
     const bags = vr.reduce((s, r) => s + r.harvesting_output_bags, 0);
@@ -324,7 +324,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const recordsByDate = useMemo(() => {
     const map: Record<string, AgriRecord[]> = {};
-    vr.forEach((r) => { const day = r.created_at.slice(0, 10); if (!map[day]) map[day] = []; map[day].push(r); });
+    vr.forEach((r) => { const day = new Date(r.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); if (!map[day]) map[day] = []; map[day].push(r); });
     return map;
   }, [vr]);
 

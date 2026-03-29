@@ -19,7 +19,7 @@ function pad(n: number) {
 }
 
 function formatDateKey(d: Date) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 }
 
 function getCalendarDays(year: number, month: number) {
