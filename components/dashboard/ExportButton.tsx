@@ -1,7 +1,8 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Download, FileText, Table2, CalendarDays, MapPin, Printer, FileBarChart } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
+import { MONTH_NAMES } from "@/lib/data";
 import { openPrintableReport } from "@/lib/print-report";
 
 function downloadBlob(content: string, filename: string, type: string) {
@@ -25,7 +26,33 @@ function groupBy<T>(arr: T[], keyFn: (item: T) => string): Record<string, T[]> {
 export default function ExportButton() {
   const { records, farmers } = useAgriData();
   const [open, setOpen] = useState(false);
+  const [exportMonth, setExportMonth] = useState("all");
   const ref = useRef<HTMLDivElement>(null);
+
+  // Available months from records, sorted newest first
+  const availableMonths = useMemo(() => {
+    const seen = new Set<string>();
+    records.forEach((r) => { seen.add(r.created_at.slice(0, 7)); });
+    return Array.from(seen).sort((a, b) => b.localeCompare(a)).map((key) => {
+      const [y, m] = key.split("-");
+      return { key, label: `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}` };
+    });
+  }, [records]);
+
+  // Filtered records based on selected month
+  const filteredRecords = useMemo(
+    () => exportMonth === "all" ? records : records.filter((r) => r.created_at.startsWith(exportMonth)),
+    [records, exportMonth]
+  );
+
+  // Build refDate for print reports
+  const exportRefDate = useMemo(() => {
+    if (exportMonth === "all") return new Date();
+    const [y, m] = exportMonth.split("-").map(Number);
+    return new Date(y, m - 1, 15);
+  }, [exportMonth]);
+
+  const fileSuffix = exportMonth === "all" ? "" : `-${exportMonth}`;
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -38,7 +65,7 @@ export default function ExportButton() {
   // ── CSV Exports ────────────────────────────────────────────────────────
   function exportRecordsCSV() {
     const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest (bags)", "Damage Pests (ha)", "Damage Calamity (ha)", "Pests/Diseases", "Calamity", "Remarks", "Created"];
-    const rows = records.map((r) => [
+    const rows = filteredRecords.map((r) => [
       r.barangay, r.commodity, r.sub_category,
       r.farmer_male, r.farmer_female, r.total_farmers,
       r.planting_area_hectares, r.harvesting_output_bags,
@@ -46,7 +73,7 @@ export default function ExportButton() {
       `"${r.pests_diseases}"`, `"${r.calamity}"`, `"${r.remarks}"`,
       r.created_at.slice(0, 10),
     ].join(","));
-    downloadBlob([headers.join(","), ...rows].join("\n"), "agridash-records.csv", "text/csv");
+    downloadBlob([headers.join(","), ...rows].join("\n"), `agridash-records${fileSuffix}.csv`, "text/csv");
     setOpen(false);
   }
 
@@ -60,7 +87,7 @@ export default function ExportButton() {
   }
 
   function exportMonthlySummaryCSV() {
-    const grouped = groupBy(records, (r) => `${r.created_at.slice(0, 7)}|${r.barangay}`);
+    const grouped = groupBy(filteredRecords, (r) => `${r.created_at.slice(0, 7)}|${r.barangay}`);
     const headers = ["Month", "Barangay", "Records", "Farmers", "Harvest (bags)", "Area (ha)", "Damage (ha)"];
     const rows = Object.entries(grouped).map(([key, group]) => {
       const [month, barangay] = key.split("|");
@@ -71,12 +98,12 @@ export default function ExportButton() {
         group.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2),
       ].join(",");
     });
-    downloadBlob([headers.join(","), ...rows].join("\n"), "agridash-monthly-summary.csv", "text/csv");
+    downloadBlob([headers.join(","), ...rows].join("\n"), `agridash-monthly-summary${fileSuffix}.csv`, "text/csv");
     setOpen(false);
   }
 
   function exportBarangaySummaryCSV() {
-    const grouped = groupBy(records, (r) => r.barangay);
+    const grouped = groupBy(filteredRecords, (r) => r.barangay);
     const headers = ["Barangay", "Records", "Male", "Female", "Total", "Harvest (bags)", "MT", "Area (ha)", "Damage (ha)", "Damage %", "Last Updated"];
     const rows = Object.entries(grouped).map(([barangay, group]) => {
       const male = group.reduce((s, r) => s + r.farmer_male, 0);
@@ -87,13 +114,13 @@ export default function ExportButton() {
       const lastUpdated = group.reduce((latest, r) => r.created_at > latest ? r.created_at : latest, group[0].created_at).slice(0, 10);
       return [barangay, group.length, male, female, male + female, harvest, (harvest * 0.04).toFixed(2), area.toFixed(2), dmg.toFixed(2), area > 0 ? ((dmg / area) * 100).toFixed(1) : "0", lastUpdated].join(",");
     });
-    downloadBlob([headers.join(","), ...rows].join("\n"), "agridash-barangay-summary.csv", "text/csv");
+    downloadBlob([headers.join(","), ...rows].join("\n"), `agridash-barangay-summary${fileSuffix}.csv`, "text/csv");
     setOpen(false);
   }
 
   // ── Printable Reports ──────────────────────────────────────────────────
   function printReport(period: "monthly" | "quarterly" | "yearly" | "full") {
-    openPrintableReport({ records, farmers }, period);
+    openPrintableReport({ records: filteredRecords, farmers }, period, exportRefDate);
     setOpen(false);
   }
 
@@ -115,6 +142,18 @@ export default function ExportButton() {
 
       {open && (
         <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-gray-100 bg-white py-1 shadow-lg z-50">
+          {/* Month picker */}
+          <div className="px-3 py-2 border-b border-gray-100">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-300">Period</label>
+            <select
+              className="mt-1 w-full appearance-none rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-green-400 transition"
+              value={exportMonth}
+              onChange={(e) => setExportMonth(e.target.value)}
+            >
+              <option value="all">All Time</option>
+              {availableMonths.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+          </div>
           <SectionLabel text="CSV Downloads" />
           <button onClick={exportRecordsCSV} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-green-50 transition">
             <Table2 size={14} className="text-green-600" /> Records CSV

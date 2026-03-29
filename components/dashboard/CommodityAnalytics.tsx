@@ -38,9 +38,19 @@ const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent
   ) : null;
 };
 
-export default function CommodityAnalytics() {
-  const { productionByCommodity } = useAgriData();
-  const data = productionByCommodity;
+export default function CommodityAnalytics({ barangayFilter }: { barangayFilter?: string }) {
+  const { productionByCommodity, records } = useAgriData();
+  const isFiltered = barangayFilter && barangayFilter !== "All";
+
+  const data = isFiltered
+    ? (() => {
+        const t: Record<string, number> = {};
+        records.filter((r) => r.barangay === barangayFilter).forEach((r) => {
+          t[r.commodity] = (t[r.commodity] || 0) + r.harvesting_output_bags;
+        });
+        return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
+      })()
+    : productionByCommodity;
 
   if (data.length === 0) {
     return (

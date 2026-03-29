@@ -58,8 +58,20 @@ function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-export default function DailySummaryCalendar() {
+export default function DailySummaryCalendar({ barangayFilter }: { barangayFilter?: string }) {
   const { recordsByDate } = useAgriData();
+  const isFiltered = barangayFilter && barangayFilter !== "All";
+
+  // Filter recordsByDate by barangay if needed
+  const filteredByDate = useMemo(() => {
+    if (!isFiltered) return recordsByDate;
+    const result: Record<string, AgriRecord[]> = {};
+    for (const [date, recs] of Object.entries(recordsByDate)) {
+      const filtered = recs.filter((r) => r.barangay === barangayFilter);
+      if (filtered.length > 0) result[date] = filtered;
+    }
+    return result;
+  }, [recordsByDate, isFiltered, barangayFilter]);
   const { isBarangayUser, userBarangay, isAdminOrAbove } = useAuth();
 
   const today = new Date();
@@ -145,7 +157,7 @@ export default function DailySummaryCalendar() {
   }
 
   const selectedDayStr = formatDateKey(selectedDay);
-  const selectedRecords = recordsByDate[selectedDayStr] || [];
+  const selectedRecords = filteredByDate[selectedDayStr] || [];
   const grouped = useMemo(() => groupByBarangay(selectedRecords), [selectedRecords]);
 
   const defaultBarangay = isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0];
@@ -253,7 +265,7 @@ export default function DailySummaryCalendar() {
                 {calendarDays.map((day, i) => {
                   if (day === null) return <div key={`e-${i}`} />;
                   const key = dateKey(day);
-                  const recs = recordsByDate[key] || [];
+                  const recs = filteredByDate[key] || [];
                   const isToday = key === todayStr;
                   const isSelected = isSameDay(selectedDay, new Date(year, month, day));
 
@@ -319,7 +331,7 @@ export default function DailySummaryCalendar() {
               <div className="grid grid-cols-7 gap-2">
                 {weekDays.map((wd) => {
                   const wdStr = formatDateKey(wd);
-                  const recs = recordsByDate[wdStr] || [];
+                  const recs = filteredByDate[wdStr] || [];
                   const isToday = wdStr === todayStr;
                   const isSelected = isSameDay(selectedDay, wd);
 

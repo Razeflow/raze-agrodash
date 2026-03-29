@@ -1,4 +1,5 @@
 "use client";
+import { useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
 import { COMMODITY_COLORS } from "@/lib/data";
 import { Users, Wheat, MapPin, AlertTriangle, Trophy } from "lucide-react";
@@ -6,15 +7,39 @@ import { Users, Wheat, MapPin, AlertTriangle, Trophy } from "lucide-react";
 const kpiCardStyle = () =>
   `relative overflow-hidden rounded-2xl border p-5 bg-white shadow-sm transition-shadow hover:shadow-md`;
 
-export default function KpiCards() {
-  const { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity } = useAgriData();
-  const topColor = COMMODITY_COLORS[mostProducedCommodity] || "#16a34a";
+export default function KpiCards({ barangayFilter }: { barangayFilter?: string }) {
+  const { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity, records, farmers } = useAgriData();
+
+  const isFiltered = barangayFilter && barangayFilter !== "All";
+
+  const stats = useMemo(() => {
+    if (!isFiltered) return { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity };
+    const fr = records.filter((r) => r.barangay === barangayFilter);
+    const ff = farmers.filter((f) => f.barangay === barangayFilter);
+    const male = ff.filter((f) => f.gender === "Male").length;
+    const female = ff.filter((f) => f.gender === "Female").length;
+    const bags = fr.reduce((s, r) => s + r.harvesting_output_bags, 0);
+    const area = +fr.reduce((s, r) => s + r.planting_area_hectares, 0).toFixed(2);
+    const dmg = +fr.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2);
+    const prodByCom: Record<string, number> = {};
+    fr.forEach((r) => { prodByCom[r.commodity] = (prodByCom[r.commodity] || 0) + r.harvesting_output_bags; });
+    const top = Object.entries(prodByCom).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "N/A";
+    return {
+      totalFarmers: { male, female, total: ff.length },
+      totalProduction: { bags, tons: +(bags * 0.04).toFixed(2) },
+      totalPlantingArea: area,
+      totalDamagedArea: dmg,
+      mostProducedCommodity: top,
+    };
+  }, [isFiltered, barangayFilter, records, farmers, totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity]);
+
+  const topColor = COMMODITY_COLORS[stats.mostProducedCommodity] || "#16a34a";
 
   const cards = [
     {
       label: "Total Farmers",
-      value: totalFarmers.total.toLocaleString(),
-      sub: `${totalFarmers.male.toLocaleString()} male · ${totalFarmers.female.toLocaleString()} female`,
+      value: stats.totalFarmers.total.toLocaleString(),
+      sub: `${stats.totalFarmers.male.toLocaleString()} male · ${stats.totalFarmers.female.toLocaleString()} female`,
       icon: Users,
       color: "#16a34a",
       bg: "#f0faf0",
@@ -22,8 +47,8 @@ export default function KpiCards() {
     },
     {
       label: "Total Production",
-      value: `${totalProduction.tons.toLocaleString()} MT`,
-      sub: `${totalProduction.bags.toLocaleString()} bags (40 kg/bag)`,
+      value: `${stats.totalProduction.tons.toLocaleString()} MT`,
+      sub: `${stats.totalProduction.bags.toLocaleString()} bags (40 kg/bag)`,
       icon: Wheat,
       color: "#ca8a04",
       bg: "#fefce8",
@@ -31,7 +56,7 @@ export default function KpiCards() {
     },
     {
       label: "Total Planting Area",
-      value: `${totalPlantingArea.toLocaleString()} ha`,
+      value: `${stats.totalPlantingArea.toLocaleString()} ha`,
       sub: "Across all commodities",
       icon: MapPin,
       color: "#0284c7",
@@ -40,7 +65,7 @@ export default function KpiCards() {
     },
     {
       label: "Total Damaged Area",
-      value: `${totalDamagedArea.toLocaleString()} ha`,
+      value: `${stats.totalDamagedArea.toLocaleString()} ha`,
       sub: "Pests, diseases & calamities",
       icon: AlertTriangle,
       color: "#dc2626",
@@ -49,7 +74,7 @@ export default function KpiCards() {
     },
     {
       label: "Top Commodity",
-      value: mostProducedCommodity,
+      value: stats.mostProducedCommodity,
       sub: "Highest production output",
       icon: Trophy,
       color: topColor,

@@ -29,7 +29,11 @@ export default function DataTable() {
   const { records } = useAgriData();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
-  const [periodFilter, setPeriodFilter] = useState("All");
+  const [periodFilter, setPeriodFilter] = useState(() => {
+    const now = new Date();
+    const ph = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+    return `${ph.getFullYear()}-${String(ph.getMonth() + 1).padStart(2, "0")}`;
+  });
   const [barangayFilter, setBarangayFilter] = useState("All");
   const [page, setPage] = useState(1);
   const PER_PAGE = 12;

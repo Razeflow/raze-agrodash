@@ -8,7 +8,7 @@ type SortKey = "production" | "farmers" | "entries" | "area";
 
 const RANK_COLORS = ["#ca8a04", "#9ca3af", "#b45309"]; // gold, silver, bronze
 
-export default function BarangayLeaderboard() {
+export default function BarangayLeaderboard({ barangayFilter }: { barangayFilter?: string }) {
   const { records } = useAgriData();
   const [sortBy, setSortBy] = useState<SortKey>("production");
 
@@ -61,7 +61,7 @@ export default function BarangayLeaderboard() {
           const isActive = b[sortBy] > 0;
 
           return (
-            <div key={b.name} className={`flex items-center gap-3 rounded-lg px-3 py-2 transition ${isActive ? "hover:bg-green-50/50" : "opacity-50"}`}>
+            <div key={b.name} className={`flex items-center gap-3 rounded-lg px-3 py-2 transition ${barangayFilter && barangayFilter !== "All" && b.name === barangayFilter ? "bg-green-50 ring-2 ring-green-400" : ""} ${isActive ? "hover:bg-green-50/50" : "opacity-50"}`}>
               {/* Rank */}
               <div
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"

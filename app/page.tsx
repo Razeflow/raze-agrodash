@@ -14,7 +14,8 @@ import BarangayLeaderboard from "@/components/dashboard/BarangayLeaderboard";
 import ExportButton from "@/components/dashboard/ExportButton";
 import PasswordChangeDialog from "@/components/dashboard/PasswordChangeDialog";
 import UserManagement from "@/components/dashboard/UserManagement";
-import { Leaf, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList, LogOut, Shield, Key, UserCog } from "lucide-react";
+import { BARANGAYS } from "@/lib/data";
+import { Leaf, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList, LogOut, Shield, Key, UserCog, MapPin } from "lucide-react";
 
 const ALL_TABS = [
   { id: "overview",  label: "Overview",      icon: BarChart2,      adminOnly: false, superAdminOnly: false },
@@ -30,6 +31,7 @@ export default function Page() {
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
   const [pwDialogOpen, setPwDialogOpen] = useState(false);
+  const [overviewBarangay, setOverviewBarangay] = useState("All");
 
   // Not logged in → show login page
   if (!isLoggedIn) return <LoginPage />;
@@ -166,11 +168,32 @@ export default function Page() {
         <main className="p-5 space-y-5 max-w-screen-2xl">
           {tab === "overview" && (
             <>
-              <KpiCards />
-              <DailySummaryCalendar />
-              {isAdminOrAbove && <BarangayLeaderboard />}
-              <CommodityAnalytics />
-              <SubCategoryAnalytics />
+              {isAdminOrAbove && (
+                <div className="flex items-center gap-2">
+                  <MapPin size={14} className="text-green-600" />
+                  <select
+                    className="h-8 appearance-none rounded-full border border-gray-200 bg-white pl-3 pr-6 text-xs font-semibold text-gray-700 outline-none focus:border-green-400 transition shadow-sm"
+                    value={overviewBarangay}
+                    onChange={(e) => setOverviewBarangay(e.target.value)}
+                  >
+                    <option value="All">All Barangays</option>
+                    {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  {overviewBarangay !== "All" && (
+                    <button
+                      onClick={() => setOverviewBarangay("All")}
+                      className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold text-green-700 hover:bg-green-200 transition"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
+              <KpiCards barangayFilter={overviewBarangay} />
+              <DailySummaryCalendar barangayFilter={overviewBarangay} />
+              {isAdminOrAbove && <BarangayLeaderboard barangayFilter={overviewBarangay} />}
+              <CommodityAnalytics barangayFilter={overviewBarangay} />
+              <SubCategoryAnalytics barangayFilter={overviewBarangay} />
             </>
           )}
           {tab === "damage" && <DamageRiskMonitoring />}

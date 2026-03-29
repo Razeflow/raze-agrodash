@@ -8,8 +8,10 @@ import { COMMODITY_COLORS } from "@/lib/data";
 
 const COMMODITIES = ["Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"] as const;
 
-export default function SubCategoryAnalytics() {
-  const { records } = useAgriData();
+export default function SubCategoryAnalytics({ barangayFilter }: { barangayFilter?: string }) {
+  const { records: allRecords } = useAgriData();
+  const isFiltered = barangayFilter && barangayFilter !== "All";
+  const records = useMemo(() => isFiltered ? allRecords.filter((r) => r.barangay === barangayFilter) : allRecords, [allRecords, isFiltered, barangayFilter]);
   const [active, setActive] = useState<string>("Rice");
   const color = COMMODITY_COLORS[active];
 
