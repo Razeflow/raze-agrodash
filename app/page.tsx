@@ -48,14 +48,15 @@ export default function Page() {
   const roleColor = user?.role === "SUPER_ADMIN" ? "#dc2626" : user?.role === "ADMIN" ? "#9333ea" : "#16a34a";
 
   return (
-    <div className="min-h-screen" style={{ background: "#f0f4f0" }}>
+    <div className="min-h-screen" style={{ background: "var(--bg)" }}>
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-full w-60 flex-col border-r border-green-100 bg-white shadow-sm transition-transform duration-300 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}
+        className={`fixed left-0 top-0 z-40 flex h-full w-60 flex-col border-r bg-white/90 backdrop-blur-md shadow-sm transition-transform duration-300 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}
+        style={{ borderColor: "var(--border)" }}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 border-b border-green-50 px-5 py-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-600">
+        <div className="flex items-center gap-3 border-b px-5 py-5" style={{ borderColor: "var(--border)" }}>
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "var(--accent-blue)" }}>
             <Leaf size={18} className="text-white" />
           </div>
           <div>
@@ -73,7 +74,7 @@ export default function Page() {
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all"
               style={
                 tab === t.id
-                  ? { background: "#f0faf0", color: "#16a34a", fontWeight: 600 }
+                  ? { background: "color-mix(in oklab, var(--accent-blue) 10%, transparent)", color: "var(--accent-blue)", fontWeight: 600 }
                   : { color: "#6b7280" }
               }
             >
@@ -84,7 +85,7 @@ export default function Page() {
         </nav>
 
         {/* User info + logout */}
-        <div className="border-t border-green-50 p-4">
+        <div className="border-t p-4" style={{ borderColor: "var(--border)" }}>
           <div className="flex items-center gap-2 mb-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-full" style={{ background: roleColor + "18" }}>
               <Shield size={13} style={{ color: roleColor }} />
@@ -98,13 +99,15 @@ export default function Page() {
           </div>
           <button
             onClick={() => setPwDialogOpen(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-green-50 hover:text-green-600 hover:border-green-200 transition mb-1.5"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs text-gray-500 transition mb-1.5"
+            style={{ borderColor: "var(--border)" }}
           >
             <Key size={13} /> Change Password
           </button>
           <button
             onClick={logout}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs text-gray-500 transition hover:text-red-500"
+            style={{ borderColor: "var(--border)" }}
           >
             <LogOut size={13} /> Sign Out
           </button>
@@ -120,11 +123,12 @@ export default function Page() {
       {/* ── Main ─────────────────────────────────────────────────────────── */}
       <div className="lg:pl-60">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 flex items-center justify-between border-b border-green-100 bg-white/80 px-5 py-3 backdrop-blur-md">
+        <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-white/75 px-5 py-3 backdrop-blur-md" style={{ borderColor: "var(--border)" }}>
           <div className="flex items-center gap-3">
             <button
-              className="rounded-lg border border-gray-200 p-1.5 lg:hidden"
+              className="rounded-lg border p-1.5 lg:hidden"
               onClick={() => setMenuOpen(!menuOpen)}
+              style={{ borderColor: "var(--border)" }}
             >
               {menuOpen ? <X size={16} /> : <Menu size={16} />}
             </button>
@@ -147,8 +151,8 @@ export default function Page() {
                 className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all"
                 style={
                   tab === t.id
-                    ? { background: "#16a34a", color: "#fff" }
-                    : { background: "#f3f4f6", color: "#6b7280" }
+                    ? { background: "var(--accent-blue)", color: "#fff" }
+                    : { background: "color-mix(in oklab, var(--surface) 70%, var(--surface-2))", color: "#6b7280", border: "1px solid var(--border)" }
                 }
               >
                 <t.icon size={12} />

@@ -90,18 +90,20 @@ export default function DataTable() {
 
   return (
     <>
-      <div className="fade-up delay-1 rounded-2xl border border-green-100 bg-white shadow-sm">
+      <div className="fade-up delay-1 ui-card ui-card--shadow">
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-50 p-5">
+        <div className="ui-card-header flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-widest text-gray-400">Agricultural Records</h2>
-            <p className="text-xs text-gray-400">{filtered.length} records</p>
+            <h2 className="text-sm font-semibold uppercase tracking-widest" style={{ color: "var(--text-soft)" }}>
+              Agricultural Records
+            </h2>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{filtered.length} records</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
-                className="h-8 rounded-full border border-gray-200 bg-gray-50 pl-8 pr-3 text-xs text-gray-700 placeholder-gray-400 outline-none focus:border-green-400 focus:bg-white transition"
+                className="ui-input h-8 pl-8 pr-3 text-xs text-gray-700 placeholder-gray-400 transition"
                 placeholder="Search barangay, crop, pest..."
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -111,7 +113,7 @@ export default function DataTable() {
             <div className="relative">
               <Filter size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <select
-                className="h-8 appearance-none rounded-full border border-gray-200 bg-gray-50 pl-8 pr-6 text-xs text-gray-700 outline-none focus:border-green-400 focus:bg-white transition"
+                className="ui-input h-8 appearance-none pl-8 pr-6 text-xs text-gray-700 transition"
                 value={filter}
                 onChange={(e) => { setFilter(e.target.value); setPage(1); }}
               >
@@ -122,7 +124,7 @@ export default function DataTable() {
             <div className="relative">
               <MapPin size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <select
-                className="h-8 appearance-none rounded-full border border-gray-200 bg-gray-50 pl-8 pr-6 text-xs text-gray-700 outline-none focus:border-green-400 focus:bg-white transition"
+                className="ui-input h-8 appearance-none pl-8 pr-6 text-xs text-gray-700 transition"
                 value={barangayFilter}
                 onChange={(e) => { setBarangayFilter(e.target.value); setPage(1); }}
               >
@@ -134,7 +136,7 @@ export default function DataTable() {
             <div className="relative">
               <CalendarDays size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <select
-                className="h-8 appearance-none rounded-full border border-gray-200 bg-gray-50 pl-8 pr-6 text-xs text-gray-700 outline-none focus:border-green-400 focus:bg-white transition"
+                className="ui-input h-8 appearance-none pl-8 pr-6 text-xs text-gray-700 transition"
                 value={periodFilter}
                 onChange={(e) => { setPeriodFilter(e.target.value); setPage(1); }}
               >
@@ -144,7 +146,8 @@ export default function DataTable() {
             </div>
             <button
               onClick={openAdd}
-              className="flex items-center gap-1.5 rounded-full bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition"
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-white transition"
+              style={{ background: "var(--accent-blue)" }}
             >
               <Plus size={14} /> Add Record
             </button>
@@ -163,7 +166,11 @@ export default function DataTable() {
                 <thead>
                   <tr>
                     {["Barangay","Period","Commodity","Sub-category","Male","Female","Total","Area (ha)","Harvest (bags)","Damage (ha)","Pests / Diseases","Calamity",""].map((h) => (
-                      <th key={h} className="whitespace-nowrap bg-gray-50 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                      <th
+                        key={h}
+                        className="whitespace-nowrap px-3 py-2.5 text-xs font-semibold uppercase tracking-wide border-b"
+                        style={{ background: "var(--surface-2)", color: "var(--text-soft)", borderColor: "var(--border)" }}
+                      >
                         {h}
                       </th>
                     ))}
@@ -175,7 +182,11 @@ export default function DataTable() {
                     return (
                       <tr
                         key={r.id}
-                        className={`border-b border-gray-50 transition-colors hover:bg-green-50/40 ${i % 2 === 0 ? "bg-white" : "bg-gray-50/30"}`}
+                        className={`transition-colors ${i % 2 === 0 ? "bg-white" : ""}`}
+                        style={{
+                          borderBottom: "1px solid var(--border)",
+                          background: i % 2 === 0 ? "var(--surface)" : "color-mix(in oklab, var(--surface) 92%, var(--surface-2))",
+                        }}
                       >
                         <td className="px-3 py-2.5 text-xs font-medium text-gray-700 whitespace-nowrap">{r.barangay}</td>
                         <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
@@ -221,12 +232,17 @@ export default function DataTable() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between border-t border-gray-50 px-5 py-3">
+            <div className="flex items-center justify-between border-t px-5 py-3" style={{ borderColor: "var(--border)" }}>
               <span className="text-xs text-gray-400">
                 Page {page} of {totalPages} · {filtered.length} records
               </span>
               <div className="flex gap-1.5">
-                <button disabled={page === 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-500 transition hover:bg-green-50 disabled:opacity-30">
+                <button
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="rounded-lg border px-3 py-1 text-xs text-gray-500 transition disabled:opacity-30"
+                  style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+                >
                   ← Prev
                 </button>
                 {Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -236,12 +252,21 @@ export default function DataTable() {
                       key={p}
                       onClick={() => setPage(p)}
                       className="rounded-lg border px-3 py-1 text-xs transition"
-                      style={p === page ? { background: "#16a34a", color: "#fff", borderColor: "#16a34a" } : { borderColor: "#e5e7eb", color: "#6b7280" }}
+                      style={
+                        p === page
+                          ? { background: "var(--accent-blue)", color: "#fff", borderColor: "var(--accent-blue)" }
+                          : { borderColor: "var(--border)", color: "#6b7280", background: "var(--surface)" }
+                      }
                     >
                       {p}
                     </button>
                   ))}
-                <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-gray-200 px-3 py-1 text-xs text-gray-500 transition hover:bg-green-50 disabled:opacity-30">
+                <button
+                  disabled={page === totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="rounded-lg border px-3 py-1 text-xs text-gray-500 transition disabled:opacity-30"
+                  style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+                >
                   Next →
                 </button>
               </div>

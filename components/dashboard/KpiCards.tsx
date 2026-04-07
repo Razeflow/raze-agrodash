@@ -5,7 +5,7 @@ import { COMMODITY_COLORS } from "@/lib/data";
 import { Users, Wheat, MapPin, AlertTriangle, Trophy } from "lucide-react";
 
 const kpiCardStyle = () =>
-  `relative overflow-hidden rounded-2xl border p-5 bg-white shadow-sm transition-shadow hover:shadow-md`;
+  `ui-card relative overflow-hidden p-5 transition-shadow hover:shadow-md`;
 
 export default function KpiCards({ barangayFilter }: { barangayFilter?: string }) {
   const { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity, records, farmers } = useAgriData();
@@ -100,7 +100,7 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
             </div>
             <p
               className="text-xs font-semibold uppercase tracking-widest"
-              style={{ color: "#6b7280" }}
+              style={{ color: "var(--text-soft)" }}
             >
               {c.label}
             </p>
@@ -108,13 +108,13 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
               className="mt-1 text-2xl font-bold leading-tight"
               style={{
                 fontFamily: "Space Mono, monospace",
-                color: "#1a2e1a",
+                color: "var(--text)",
                 fontSize: c.label === "Top Commodity" ? "1.1rem" : undefined,
               }}
             >
               {c.value}
             </p>
-            <p className="mt-1 text-xs" style={{ color: "#9aada9" }}>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
               {c.sub}
             </p>
           </div>
