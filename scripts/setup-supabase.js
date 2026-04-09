@@ -1,9 +1,13 @@
 // One-time script: Sets up Supabase schema + seeds 13 users
 // Run: node scripts/setup-supabase.js
 
-const SUPABASE_URL = "https://epwajdkvhoflyjodemnk.supabase.co";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+if (!SUPABASE_URL) {
+  console.error("Missing SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL env var");
+  process.exit(1);
+}
 if (!SERVICE_ROLE_KEY) {
   console.error("Missing SUPABASE_SERVICE_ROLE_KEY env var");
   process.exit(1);

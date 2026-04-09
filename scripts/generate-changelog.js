@@ -343,7 +343,8 @@ const doc = new Document({
   }],
 });
 
-const outputPath = "C:\\Users\\hkaku\\Desktop\\agri-dashboard\\Raze_AgroDash_Version_History.docx";
+const path = require("path");
+const outputPath = path.join(__dirname, "..", "Raze_AgroDash_Version_History.docx");
 
 Packer.toBuffer(doc).then((buffer) => {
   fs.writeFileSync(outputPath, buffer);

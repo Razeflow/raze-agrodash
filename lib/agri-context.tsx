@@ -56,7 +56,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   const { isBarangayUser, userBarangay, isLoggedIn } = useAuth();
   const [records, setRecords] = useState<AgriRecord[]>([]);
   const [farmers, setFarmers] = useState<Farmer[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [, setLoaded] = useState(false);
 
   // Keep a ref in sync so setRecords callbacks always read the latest farmers
   const farmersRef = useRef<Farmer[]>(farmers);
@@ -328,15 +328,17 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     return map;
   }, [vr]);
 
+  const [staleTimestamp, setStaleTimestamp] = useState(() => Date.now());
+  useEffect(() => { setStaleTimestamp(Date.now()); }, [records]);
+
   const staleBarangays = useMemo(() => {
-    const now = Date.now();
     return BARANGAYS.map((name) => {
-      const br = records.filter((r) => r.barangay === name); // use full records for stale detection
+      const br = records.filter((r) => r.barangay === name);
       if (br.length === 0) return { name, daysSinceUpdate: null, lastUpdate: null };
       const latest = br.reduce((max, r) => r.created_at > max ? r.created_at : max, "");
-      return { name, daysSinceUpdate: Math.floor((now - new Date(latest).getTime()) / 86400000), lastUpdate: latest.slice(0, 10) };
+      return { name, daysSinceUpdate: Math.floor((staleTimestamp - new Date(latest).getTime()) / 86400000), lastUpdate: latest.slice(0, 10) };
     });
-  }, [records]);
+  }, [records, staleTimestamp]);
 
   const value: AgriContextValue = {
     records: vr, addRecord, updateRecord, deleteRecord,

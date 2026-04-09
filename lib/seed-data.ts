@@ -157,8 +157,6 @@ export function seedData(): { farmersAdded: number; recordsAdded: number } {
     if (f) existingFarmers = JSON.parse(f);
   } catch { /* empty */ }
 
-  const existingBarangays = new Set(existingFarmers.map((f) => f.barangay));
-
   let newFarmers: Farmer[] = [];
   let newRecords: AgriRecord[] = [];
 

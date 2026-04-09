@@ -1,27 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900;1,9..40,400&family=Space+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  /* Light “enterprise dashboard” palette (inspired by your reference screenshots) */
-  --bg: #eef5ff;           /* soft blue-tinted canvas */
-  --surface: #ffffff;      /* card surface */
-  --surface-2: #f6f9ff;    /* subtle surface for headers/stripes */
-  --border: #e6edf7;       /* quiet border */
-  --text: #0f172a;         /* slate-900 */
-  --text-muted: #64748b;   /* slate-500 */
-  --text-soft: #94a3b8;    /* slate-400 */
+  /* Premium minimalist palette — glassmorphic depth */
+  --bg: #F0F4F8;
+  --surface: rgba(255, 255, 255, 0.70);
+  --surface-solid: #ffffff;
+  --surface-2: #f1f5f9;
+  --border: rgba(255, 255, 255, 0.40);
+  --border-subtle: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-soft: #94a3b8;
 
-  --accent-green: #16a34a;
+  --accent-green: #10b981;
+  --accent-emerald: #059669;
   --accent-gold: #ca8a04;
-  --accent-blue: #2563eb;  /* stronger primary blue */
+  --accent-blue: #3b82f6;
   --accent-purple: #7c3aed;
   --accent-orange: #ea580c;
   --accent-red: #dc2626;
 
-  --ring: rgba(37, 99, 235, 0.22);
-  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 30px rgba(15, 23, 42, 0.05);
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --radius-card: 16px;
+  --ring: rgba(16, 185, 129, 0.22);
+  --shadow: 0 20px 25px -5px rgba(148, 163, 184, 0.10), 0 8px 10px -6px rgba(148, 163, 184, 0.10);
+  --shadow-sm: 0 1px 3px rgba(148, 163, 184, 0.12), 0 1px 2px rgba(148, 163, 184, 0.08);
+  --shadow-hover: 0 25px 50px -12px rgba(16, 185, 129, 0.15);
+  --radius-card: 2.5rem;
+  --radius-button: 1.5rem;
 
   --font-body: "DM Sans", sans-serif;
   --font-mono: "Space Mono", monospace;
@@ -38,13 +43,13 @@ body {
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #b6d4b6; border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.25); border-radius: 3px; }
 
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.fade-up { animation: fadeUp 0.4s ease both; }
+.fade-up { animation: fadeUp 0.5s ease both; }
 .delay-1 { animation-delay: 0.06s; }
 .delay-2 { animation-delay: 0.12s; }
 .delay-3 { animation-delay: 0.18s; }
@@ -52,7 +57,7 @@ body {
 .delay-5 { animation-delay: 0.30s; }
 
 /* -------------------------------------------------------------------------- */
-/* Reusable dashboard primitives (keep component structure unchanged)          */
+/* Premium glassmorphic dashboard primitives                                    */
 /* -------------------------------------------------------------------------- */
 
 @layer components {
@@ -60,7 +65,14 @@ body {
     border-radius: var(--radius-card);
     border: 1px solid var(--border);
     background: var(--surface);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     box-shadow: var(--shadow-sm);
+    transition: all 500ms ease;
+  }
+
+  .ui-card:hover {
+    box-shadow: var(--shadow);
   }
 
   .ui-card--shadow {
@@ -68,25 +80,73 @@ body {
   }
 
   .ui-card-header {
-    border-bottom: 1px solid color-mix(in oklab, var(--border) 75%, transparent);
-    background: color-mix(in oklab, var(--surface) 90%, var(--surface-2));
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.85);
   }
 
   .ui-pill {
-    border-radius: 999px;
+    border-radius: var(--radius-button);
     border: 1px solid var(--border);
-    background: color-mix(in oklab, var(--surface) 85%, var(--surface-2));
+    background: rgba(255, 255, 255, 0.50);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 
   .ui-input {
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: color-mix(in oklab, var(--surface) 82%, var(--surface-2));
+    border-radius: var(--radius-button);
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.50);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     outline: none;
+    transition: all 300ms ease;
   }
   .ui-input:focus {
-    border-color: color-mix(in oklab, var(--accent-blue) 60%, var(--border));
+    border-color: var(--accent-green);
     box-shadow: 0 0 0 4px var(--ring);
-    background: var(--surface);
+    background: var(--surface-solid);
+  }
+
+  /* BentoCard label pattern */
+  .ui-label {
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-soft);
+  }
+
+  /* Icon wrapper with emerald hover */
+  .ui-icon-wrap {
+    padding: 0.75rem;
+    background: var(--surface-solid);
+    border: 1px solid #f1f5f9;
+    border-radius: 1rem;
+    box-shadow: var(--shadow-sm);
+    transition: all 300ms ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .group:hover .ui-icon-wrap {
+    background: var(--accent-green);
+    color: white;
+    border-color: var(--accent-green);
+  }
+
+  /* Dialog primitives */
+  .ui-dialog-overlay {
+    background: rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .ui-dialog-card {
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 2rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   }
 }

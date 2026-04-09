@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Shield, KeyRound, CheckCircle2, X } from "lucide-react";
 import type { UserRole } from "@/lib/auth";
+import BentoCard from "@/components/ui/BentoCard";
 
 const ROLE_STYLES: Record<UserRole, { label: string; bg: string; text: string }> = {
   SUPER_ADMIN:   { label: "Super Admin",   bg: "bg-red-100",    text: "text-red-700" },
@@ -21,10 +22,12 @@ export default function UserManagement() {
 
   if (!isSuperAdmin) {
     return (
-      <div className="rounded-2xl bg-white border border-gray-100 p-8 text-center shadow-sm">
-        <Shield size={40} className="mx-auto text-gray-300 mb-3" />
-        <p className="text-sm text-gray-500">Super Admin access required.</p>
-      </div>
+      <BentoCard>
+        <div className="text-center py-4">
+          <Shield size={40} className="mx-auto text-slate-300 mb-3" />
+          <p className="text-sm text-slate-500">Super Admin access required.</p>
+        </div>
+      </BentoCard>
     );
   }
 
@@ -75,23 +78,12 @@ export default function UserManagement() {
   }
 
   return (
-    <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-gray-100 px-6 py-4">
-        <div className="rounded-full bg-green-100 p-2">
-          <Shield size={18} className="text-green-600" />
-        </div>
-        <div>
-          <h2 className="text-base font-bold text-gray-800">User Management</h2>
-          <p className="text-xs text-gray-400">Manage accounts and reset passwords</p>
-        </div>
-      </div>
-
+    <BentoCard noPadding title="User Management" subtitle="System users & roles">
       {/* Success toast */}
       {successUser && (
-        <div className="mx-6 mt-4 flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 px-4 py-2">
-          <CheckCircle2 size={16} className="text-green-600" />
-          <p className="text-sm text-green-700">
+        <div className="mx-6 mt-2 flex items-center gap-2 rounded-2xl bg-emerald-50/70 border border-emerald-200/50 px-4 py-2">
+          <CheckCircle2 size={16} className="text-emerald-600" />
+          <p className="text-sm text-emerald-700">
             Password reset successfully for <span className="font-semibold">{successUser}</span>.
           </p>
         </div>
@@ -101,12 +93,12 @@ export default function UserManagement() {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-100 bg-gray-50/50">
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500">Username</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500">Display Name</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500">Role</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500">Barangay</th>
-              <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500">Actions</th>
+            <tr className="border-b border-white/30 bg-white/30">
+              <th className="px-6 py-3 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">Username</th>
+              <th className="px-6 py-3 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">Display Name</th>
+              <th className="px-6 py-3 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">Role</th>
+              <th className="px-6 py-3 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">Barangay</th>
+              <th className="px-6 py-3 text-right text-[10px] font-black uppercase tracking-widest text-slate-400">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -115,15 +107,15 @@ export default function UserManagement() {
               const isResetting = resettingUser === u.username;
 
               return (
-                <tr key={u.username} className="border-b border-gray-50 hover:bg-gray-50/50 transition">
-                  <td className="px-6 py-3 font-medium text-gray-700">{u.username}</td>
-                  <td className="px-6 py-3 text-gray-600">{u.displayName}</td>
+                <tr key={u.username} className="border-b border-white/20 hover:bg-emerald-50/30 transition">
+                  <td className="px-6 py-3 font-medium text-slate-700">{u.username}</td>
+                  <td className="px-6 py-3 text-slate-600">{u.displayName}</td>
                   <td className="px-6 py-3">
-                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.bg} ${style.text}`}>
+                    <span className={`inline-block rounded-[1rem] px-2.5 py-0.5 text-xs font-bold ${style.bg} ${style.text}`}>
                       {style.label}
                     </span>
                   </td>
-                  <td className="px-6 py-3 text-gray-500">{u.barangay || "---"}</td>
+                  <td className="px-6 py-3 text-slate-500">{u.barangay || "---"}</td>
                   <td className="px-6 py-3 text-right">
                     {isResetting ? (
                       <div className="flex flex-col items-end gap-2">
@@ -136,38 +128,38 @@ export default function UserManagement() {
                             placeholder="New password"
                             value={newPw}
                             onChange={(e) => setNewPw(e.target.value)}
-                            className="w-32 rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:border-green-400 focus:outline-none focus:ring-1 focus:ring-green-400"
+                            className="w-32 rounded-[1.5rem] border border-slate-200/50 bg-white/50 px-3 py-1.5 text-xs focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
                           />
                           <input
                             type="password"
                             placeholder="Confirm"
                             value={confirmPw}
                             onChange={(e) => setConfirmPw(e.target.value)}
-                            className="w-32 rounded-lg border border-gray-200 px-2 py-1.5 text-xs focus:border-green-400 focus:outline-none focus:ring-1 focus:ring-green-400"
+                            className="w-32 rounded-[1.5rem] border border-slate-200/50 bg-white/50 px-3 py-1.5 text-xs focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
                           />
                           <button
                             onClick={() => handleReset(u.username)}
                             disabled={loading}
-                            className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition disabled:opacity-50"
+                            className="rounded-[1.5rem] bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition disabled:opacity-50"
                           >
                             {loading ? "Saving..." : "Save"}
                           </button>
                           <button
                             onClick={cancelReset}
-                            className="rounded-lg p-1.5 hover:bg-gray-100 transition"
+                            className="rounded-[1.5rem] p-1.5 hover:bg-white/50 transition"
                           >
-                            <X size={14} className="text-gray-400" />
+                            <X size={14} className="text-slate-400" />
                           </button>
                         </div>
                       </div>
                     ) : successUser === u.username ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-green-600 font-semibold">
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-semibold">
                         <CheckCircle2 size={14} /> Reset!
                       </span>
                     ) : (
                       <button
                         onClick={() => openReset(u.username)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition"
+                        className="inline-flex items-center gap-1.5 rounded-[1.5rem] border border-slate-200/50 px-3 py-1.5 text-xs text-slate-600 hover:bg-emerald-50/30 hover:text-emerald-700 hover:border-emerald-200 transition"
                       >
                         <KeyRound size={12} /> Reset Password
                       </button>
@@ -179,6 +171,6 @@ export default function UserManagement() {
           </tbody>
         </table>
       </div>
-    </div>
+    </BentoCard>
   );
 }

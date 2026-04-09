@@ -6,13 +6,14 @@ import type { AgriRecord } from "@/lib/data";
 import { Search, Filter, Plus, Pencil, Trash2, CalendarDays, MapPin } from "lucide-react";
 import RecordFormDialog from "./RecordFormDialog";
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
+import BentoCard from "@/components/ui/BentoCard";
 
 const COMMODITIES = ["All", "Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"];
 
 function CommodityBadge({ name }: { name: string }) {
   const color = COMMODITY_COLORS[name] || "#888";
   return (
-    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: color + "18", color }}>
+    <span className="inline-flex items-center rounded-[1rem] px-2.5 py-0.5 text-xs font-bold" style={{ background: color + "18", color }}>
       {name}
     </span>
   );
@@ -90,20 +91,20 @@ export default function DataTable() {
 
   return (
     <>
-      <div className="fade-up delay-1 ui-card ui-card--shadow">
+      <BentoCard noPadding className="fade-up delay-1">
         {/* Header */}
-        <div className="ui-card-header flex flex-wrap items-center justify-between gap-3 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-8 pt-8 pb-4">
           <div>
-            <h2 className="text-sm font-semibold uppercase tracking-widest" style={{ color: "var(--text-soft)" }}>
+            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
               Agricultural Records
             </h2>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{filtered.length} records</p>
+            <p className="text-xs text-slate-400 mt-0.5">{filtered.length} records</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
-                className="ui-input h-8 pl-8 pr-3 text-xs text-gray-700 placeholder-gray-400 transition"
+                className="h-8 rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur pl-8 pr-3 text-xs text-slate-700 placeholder-slate-400 transition focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 placeholder="Search barangay, crop, pest..."
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -111,9 +112,9 @@ export default function DataTable() {
             </div>
             {/* Commodity filter */}
             <div className="relative">
-              <Filter size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Filter size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <select
-                className="ui-input h-8 appearance-none pl-8 pr-6 text-xs text-gray-700 transition"
+                className="h-8 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-8 pr-6 text-[10px] font-black uppercase text-slate-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 value={filter}
                 onChange={(e) => { setFilter(e.target.value); setPage(1); }}
               >
@@ -122,9 +123,9 @@ export default function DataTable() {
             </div>
             {/* Barangay filter */}
             <div className="relative">
-              <MapPin size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <MapPin size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <select
-                className="ui-input h-8 appearance-none pl-8 pr-6 text-xs text-gray-700 transition"
+                className="h-8 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-8 pr-6 text-[10px] font-black uppercase text-slate-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 value={barangayFilter}
                 onChange={(e) => { setBarangayFilter(e.target.value); setPage(1); }}
               >
@@ -134,9 +135,9 @@ export default function DataTable() {
             </div>
             {/* Period filter */}
             <div className="relative">
-              <CalendarDays size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <CalendarDays size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <select
-                className="ui-input h-8 appearance-none pl-8 pr-6 text-xs text-gray-700 transition"
+                className="h-8 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-8 pr-6 text-[10px] font-black uppercase text-slate-700 transition focus:outline-none focus:ring-2 focus:ring-emerald-200"
                 value={periodFilter}
                 onChange={(e) => { setPeriodFilter(e.target.value); setPage(1); }}
               >
@@ -146,8 +147,7 @@ export default function DataTable() {
             </div>
             <button
               onClick={openAdd}
-              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-white transition"
-              style={{ background: "var(--accent-blue)" }}
+              className="flex items-center gap-1.5 rounded-[1.5rem] bg-emerald-600 hover:bg-emerald-700 px-4 py-1.5 text-xs font-black text-white shadow-lg shadow-emerald-200 transition"
             >
               <Plus size={14} /> Add Record
             </button>
@@ -157,19 +157,18 @@ export default function DataTable() {
         {/* Table */}
         {filtered.length === 0 ? (
           <div className="p-10 text-center">
-            <p className="text-sm text-gray-400">No records found. Click &quot;Add Record&quot; to get started.</p>
+            <p className="text-sm text-slate-400">No records found. Click &quot;Add Record&quot; to get started.</p>
           </div>
         ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr>
+                  <tr className="bg-white/30 backdrop-blur">
                     {["Barangay","Period","Commodity","Sub-category","Male","Female","Total","Area (ha)","Harvest (bags)","Damage (ha)","Pests / Diseases","Calamity",""].map((h) => (
                       <th
                         key={h}
-                        className="whitespace-nowrap px-3 py-2.5 text-xs font-semibold uppercase tracking-wide border-b"
-                        style={{ background: "var(--surface-2)", color: "var(--text-soft)", borderColor: "var(--border)" }}
+                        className="whitespace-nowrap px-3 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-white/30"
                       >
                         {h}
                       </th>
@@ -182,44 +181,40 @@ export default function DataTable() {
                     return (
                       <tr
                         key={r.id}
-                        className={`transition-colors ${i % 2 === 0 ? "bg-white" : ""}`}
-                        style={{
-                          borderBottom: "1px solid var(--border)",
-                          background: i % 2 === 0 ? "var(--surface)" : "color-mix(in oklab, var(--surface) 92%, var(--surface-2))",
-                        }}
+                        className={`transition-colors hover:bg-emerald-50/30 ${i % 2 === 0 ? "bg-white/40" : "bg-transparent"}`}
                       >
-                        <td className="px-3 py-2.5 text-xs font-medium text-gray-700 whitespace-nowrap">{r.barangay}</td>
-                        <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
+                        <td className="px-3 py-2.5 text-xs font-medium text-slate-700 whitespace-nowrap">{r.barangay}</td>
+                        <td className="px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">
                           {formatPeriod(r.period_month, r.period_year)}
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap"><CommodityBadge name={r.commodity} /></td>
-                        <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{r.sub_category}</td>
+                        <td className="px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{r.sub_category}</td>
                         <td className="px-3 py-2.5 text-xs font-mono text-blue-600 text-right">{r.farmer_male}</td>
                         <td className="px-3 py-2.5 text-xs font-mono text-pink-500 text-right">{r.farmer_female}</td>
-                        <td className="px-3 py-2.5 text-xs font-mono font-bold text-gray-700 text-right">{r.total_farmers}</td>
-                        <td className="px-3 py-2.5 text-xs font-mono text-gray-600 text-right">
-                          {r.commodity === "Fishery" ? <span className="text-gray-300">—</span> : r.planting_area_hectares}
+                        <td className="px-3 py-2.5 text-xs font-mono font-bold text-slate-700 text-right">{r.total_farmers}</td>
+                        <td className="px-3 py-2.5 text-xs font-mono text-slate-600 text-right">
+                          {r.commodity === "Fishery" ? <span className="text-slate-300">—</span> : r.planting_area_hectares}
                         </td>
-                        <td className="px-3 py-2.5 text-xs font-mono font-semibold text-green-600 text-right">
-                          {r.commodity === "Fishery" ? <span className="text-gray-300">—</span> : r.harvesting_output_bags.toLocaleString()}
+                        <td className="px-3 py-2.5 text-xs font-mono font-semibold text-emerald-600 text-right">
+                          {r.commodity === "Fishery" ? <span className="text-slate-300">—</span> : r.harvesting_output_bags.toLocaleString()}
                         </td>
                         <td className="px-3 py-2.5 text-right"><RiskChip area={totalDmg} /></td>
-                        <td className="px-3 py-2.5 text-xs text-gray-500 max-w-[160px]">
-                          {r.pests_diseases === "None" ? <span className="text-gray-300">—</span> : r.pests_diseases}
+                        <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[160px]">
+                          {r.pests_diseases === "None" ? <span className="text-slate-300">—</span> : r.pests_diseases}
                         </td>
                         <td className="px-3 py-2.5 text-xs whitespace-nowrap">
                           {r.calamity === "None" ? (
-                            <span className="text-gray-300">—</span>
+                            <span className="text-slate-300">—</span>
                           ) : (
                             <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-500">{r.calamity}</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
                           <div className="flex gap-1">
-                            <button onClick={() => openEdit(r)} className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-500 transition" title="Edit">
+                            <button onClick={() => openEdit(r)} className="rounded-xl p-1.5 text-slate-400 hover:bg-blue-50/50 hover:text-blue-500 transition" title="Edit">
                               <Pencil size={13} />
                             </button>
-                            <button onClick={() => openDelete(r)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500 transition" title="Delete">
+                            <button onClick={() => openDelete(r)} className="rounded-xl p-1.5 text-slate-400 hover:bg-red-50/50 hover:text-red-500 transition" title="Delete">
                               <Trash2 size={13} />
                             </button>
                           </div>
@@ -232,16 +227,15 @@ export default function DataTable() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between border-t px-5 py-3" style={{ borderColor: "var(--border)" }}>
-              <span className="text-xs text-gray-400">
+            <div className="flex items-center justify-between border-t border-white/30 px-8 py-4">
+              <span className="text-xs text-slate-400">
                 Page {page} of {totalPages} · {filtered.length} records
               </span>
               <div className="flex gap-1.5">
                 <button
                   disabled={page === 1}
                   onClick={() => setPage((p) => p - 1)}
-                  className="rounded-lg border px-3 py-1 text-xs text-gray-500 transition disabled:opacity-30"
-                  style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+                  className="rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur px-3 py-1 text-xs text-slate-500 transition disabled:opacity-30 hover:bg-white/70"
                 >
                   ← Prev
                 </button>
@@ -251,12 +245,11 @@ export default function DataTable() {
                     <button
                       key={p}
                       onClick={() => setPage(p)}
-                      className="rounded-lg border px-3 py-1 text-xs transition"
-                      style={
+                      className={`rounded-[1.5rem] border px-3 py-1 text-xs transition ${
                         p === page
-                          ? { background: "var(--accent-blue)", color: "#fff", borderColor: "var(--accent-blue)" }
-                          : { borderColor: "var(--border)", color: "#6b7280", background: "var(--surface)" }
-                      }
+                          ? "bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-200"
+                          : "border-white/40 bg-white/50 backdrop-blur text-slate-500 hover:bg-white/70"
+                      }`}
                     >
                       {p}
                     </button>
@@ -264,8 +257,7 @@ export default function DataTable() {
                 <button
                   disabled={page === totalPages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="rounded-lg border px-3 py-1 text-xs text-gray-500 transition disabled:opacity-30"
-                  style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+                  className="rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur px-3 py-1 text-xs text-slate-500 transition disabled:opacity-30 hover:bg-white/70"
                 >
                   Next →
                 </button>
@@ -273,7 +265,7 @@ export default function DataTable() {
             </div>
           </>
         )}
-      </div>
+      </BentoCard>
 
       <RecordFormDialog open={formOpen} onClose={() => setFormOpen(false)} mode={formMode} initialData={editRecord} />
       <DeleteConfirmDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} record={deleteTarget} />

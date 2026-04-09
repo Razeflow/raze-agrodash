@@ -5,6 +5,7 @@ import LoginPage from "@/components/LoginPage";
 import KpiCards from "@/components/dashboard/KpiCards";
 import CommodityAnalytics from "@/components/dashboard/CommodityAnalytics";
 import SubCategoryAnalytics from "@/components/dashboard/SubCategoryAnalytics";
+import FindingMatrix from "@/components/dashboard/FindingMatrix";
 import DamageRiskMonitoring from "@/components/dashboard/DamageRiskMonitoring";
 import FarmerDistribution from "@/components/dashboard/FarmerDistribution";
 import DataTable from "@/components/dashboard/DataTable";
@@ -15,7 +16,19 @@ import ExportButton from "@/components/dashboard/ExportButton";
 import PasswordChangeDialog from "@/components/dashboard/PasswordChangeDialog";
 import UserManagement from "@/components/dashboard/UserManagement";
 import { BARANGAYS } from "@/lib/data";
-import { Leaf, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList, LogOut, Shield, Key, UserCog, MapPin } from "lucide-react";
+import {
+  Sprout, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList,
+  LogOut, Key, UserCog, MapPin, TrendingUp,
+} from "lucide-react";
+
+const TAB_DESCRIPTIONS: Record<string, string> = {
+  overview: "Yield & climate summary",
+  damage: "Weather alerts & loss data",
+  farmers: "Municipal database",
+  records: "Production logs",
+  manage: "System configuration",
+  users: "Admin roles",
+};
 
 const ALL_TABS = [
   { id: "overview",  label: "Overview",      icon: BarChart2,      adminOnly: false, superAdminOnly: false },
@@ -33,150 +46,144 @@ export default function Page() {
   const [pwDialogOpen, setPwDialogOpen] = useState(false);
   const [overviewBarangay, setOverviewBarangay] = useState("All");
 
-  // Not logged in → show login page
   if (!isLoggedIn) return <LoginPage />;
 
-  // Filter tabs by role
   const tabs = ALL_TABS.filter((t) => {
     if (t.superAdminOnly && !isSuperAdmin) return false;
     if (t.adminOnly && !isAdminOrAbove) return false;
     return true;
   });
 
-  // Role badge
   const roleBadge = user?.role === "SUPER_ADMIN" ? "Super Admin" : user?.role === "ADMIN" ? "Admin" : user?.barangay || "User";
-  const roleColor = user?.role === "SUPER_ADMIN" ? "#dc2626" : user?.role === "ADMIN" ? "#9333ea" : "#16a34a";
+  const initials = (user?.displayName || "U").split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
+  const today = new Date().toLocaleDateString("en-US", { timeZone: "Asia/Manila", month: "long", day: "numeric", year: "numeric" });
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg)" }}>
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      {/* ── Collapsible Sidebar ──────────────────────────────────────────── */}
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-full w-60 flex-col border-r bg-white/90 backdrop-blur-md shadow-sm transition-transform duration-300 lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}
-        style={{ borderColor: "var(--border)" }}
+        className={`
+          fixed left-0 top-0 z-40 flex h-full flex-col
+          bg-white/80 backdrop-blur-2xl border-r border-slate-200
+          p-6 overflow-hidden transition-all duration-500 ease-in-out
+          group/sidebar
+          lg:w-24 lg:hover:w-80 lg:translate-x-0
+          w-80 ${menuOpen ? "translate-x-0" : "-translate-x-full"}
+        `}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 border-b px-5 py-5" style={{ borderColor: "var(--border)" }}>
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "var(--accent-blue)" }}>
-            <Leaf size={18} className="text-white" />
+        <div className="flex items-center gap-4 mb-12 px-2">
+          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-700 rounded-2xl flex items-center justify-center shadow-xl shadow-emerald-200 shrink-0 transform lg:group-hover/sidebar:rotate-12 transition-all duration-500">
+            <Sprout className="text-white w-7 h-7" />
           </div>
-          <div>
-            <p className="text-sm font-bold text-gray-800" style={{ fontFamily: "Space Mono" }}>Raze AgroDash</p>
-            <p className="text-xs text-gray-400">Municipal Agriculture</p>
+          <div className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-500 whitespace-nowrap">
+            <h1 className="font-black text-2xl tracking-tighter text-slate-950 leading-none">AgriData</h1>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-600 font-black mt-1">Municipality of Tubo</p>
           </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 space-y-1 p-4">
+        <nav className="flex-1 space-y-3">
           {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => { setTab(t.id); setMenuOpen(false); }}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all"
-              style={
-                tab === t.id
-                  ? { background: "color-mix(in oklab, var(--accent-blue) 10%, transparent)", color: "var(--accent-blue)", fontWeight: 600 }
-                  : { color: "#6b7280" }
-              }
-            >
-              <t.icon size={16} />
-              {t.label}
-            </button>
+            <div key={t.id} className="relative group/item flex items-center">
+              <button
+                onClick={() => { setTab(t.id); setMenuOpen(false); }}
+                className={`w-full flex items-center gap-4 px-4 py-4 rounded-[1.5rem] transition-all duration-300 font-bold ${
+                  tab === t.id
+                    ? "bg-slate-950 text-white shadow-2xl shadow-slate-300"
+                    : "text-slate-400 hover:bg-white hover:text-slate-950 hover:shadow-lg"
+                }`}
+              >
+                <t.icon className={`w-6 h-6 shrink-0 ${tab === t.id ? "text-emerald-400" : "group-hover/item:text-emerald-500 transition-colors"}`} />
+                <span className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 whitespace-nowrap">
+                  {t.label}
+                </span>
+              </button>
+
+              {/* Floating tooltip when collapsed */}
+              <div className="absolute left-full ml-6 opacity-0 translate-x-4 pointer-events-none group-hover/item:opacity-100 group-hover/item:translate-x-0 transition-all duration-300 z-[60] hidden lg:block lg:group-hover/sidebar:hidden">
+                <div className="bg-slate-900 text-white p-4 rounded-3xl shadow-2xl w-56 border border-white/10 backdrop-blur-xl">
+                  <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">{t.label}</p>
+                  <p className="text-xs font-medium text-slate-300 leading-relaxed">{TAB_DESCRIPTIONS[t.id] || ""}</p>
+                  <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-500">Live Status</span>
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+            </div>
           ))}
         </nav>
 
-        {/* User info + logout */}
-        <div className="border-t p-4" style={{ borderColor: "var(--border)" }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full" style={{ background: roleColor + "18" }}>
-              <Shield size={13} style={{ color: roleColor }} />
+        {/* Profile */}
+        <div className="mt-auto">
+          {/* Change Password / Logout visible on hover */}
+          <div className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 space-y-2 mb-3">
+            <button
+              onClick={() => setPwDialogOpen(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-[1.5rem] border border-slate-100 px-3 py-2 text-xs font-bold text-slate-400 transition hover:bg-white hover:text-slate-700 hover:shadow-md"
+            >
+              <Key size={14} /> Change Password
+            </button>
+            <button
+              onClick={logout}
+              className="flex w-full items-center justify-center gap-2 rounded-[1.5rem] border border-slate-100 px-3 py-2 text-xs font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-500 hover:border-red-100"
+            >
+              <LogOut size={14} /> Sign Out
+            </button>
+          </div>
+
+          <div className="flex items-center gap-4 px-2 py-4 rounded-3xl lg:group-hover/sidebar:bg-slate-50 transition-colors duration-300">
+            <div className="w-12 h-12 rounded-2xl bg-slate-200 border-4 border-white shadow-sm flex items-center justify-center font-black text-slate-600 shrink-0 text-sm">
+              {initials}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-gray-700 truncate">{user?.displayName}</p>
-              <p className="text-[10px] font-semibold rounded-full inline-block px-1.5 py-0.5" style={{ background: roleColor + "18", color: roleColor }}>
-                {roleBadge}
-              </p>
+            <div className="flex-1 lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 overflow-hidden text-left">
+              <p className="font-black text-sm truncate text-slate-900 tracking-tight">{user?.displayName}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{roleBadge}</p>
             </div>
           </div>
-          <button
-            onClick={() => setPwDialogOpen(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs text-gray-500 transition mb-1.5"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <Key size={13} /> Change Password
-          </button>
-          <button
-            onClick={logout}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-xs text-gray-500 transition hover:text-red-500"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <LogOut size={13} /> Sign Out
-          </button>
-          <p className="mt-2 text-xs text-gray-300 text-center">Tubo, Abra · Region CAR</p>
         </div>
       </aside>
 
-      {/* Mobile menu backdrop */}
+      {/* Mobile backdrop */}
       {menuOpen && (
-        <div className="fixed inset-0 z-30 bg-black/20 lg:hidden" onClick={() => setMenuOpen(false)} />
+        <div className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />
       )}
 
-      {/* ── Main ─────────────────────────────────────────────────────────── */}
-      <div className="lg:pl-60">
-        {/* Top bar */}
-        <header className="sticky top-0 z-20 flex items-center justify-between border-b bg-white/75 px-5 py-3 backdrop-blur-md" style={{ borderColor: "var(--border)" }}>
-          <div className="flex items-center gap-3">
-            <button
-              className="rounded-lg border p-1.5 lg:hidden"
-              onClick={() => setMenuOpen(!menuOpen)}
-              style={{ borderColor: "var(--border)" }}
-            >
-              {menuOpen ? <X size={16} /> : <Menu size={16} />}
-            </button>
+      {/* ── Main Content ─────────────────────────────────────────────────── */}
+      <div className="lg:pl-24 transition-all duration-500">
+        {/* Hero Header */}
+        <header className="px-10 pt-10 pb-6">
+          <div className="flex justify-between items-end">
             <div>
-              <h1 className="text-sm font-bold text-gray-800">
-                {tabs.find((t) => t.id === tab)?.label || "Overview"}
-              </h1>
-              <p className="text-xs text-gray-400">
-                {isBarangayUser ? `${user?.barangay} Portal` : "Production Monitoring System"}
-              </p>
-            </div>
-          </div>
-
-          {/* Tab pills + Export */}
-          <div className="hidden lg:flex items-center gap-2">
-            {tabs.map((t) => (
+              {/* Mobile menu button */}
               <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all"
-                style={
-                  tab === t.id
-                    ? { background: "var(--accent-blue)", color: "#fff" }
-                    : { background: "color-mix(in oklab, var(--surface) 70%, var(--surface-2))", color: "#6b7280", border: "1px solid var(--border)" }
-                }
+                className="rounded-2xl border border-slate-200 p-2.5 mb-4 lg:hidden bg-white/70 backdrop-blur"
+                onClick={() => setMenuOpen(!menuOpen)}
               >
-                <t.icon size={12} />
-                {t.label}
+                {menuOpen ? <X size={18} /> : <Menu size={18} />}
               </button>
-            ))}
-            {isAdminOrAbove && (
-              <>
-                <div className="ml-1 h-5 w-px bg-gray-200" />
-                <ExportButton />
-              </>
-            )}
+              <div className="flex items-center gap-2 text-emerald-600 font-black text-xs uppercase tracking-[0.3em] mb-2">
+                <TrendingUp className="w-4 h-4" />
+                {isBarangayUser ? `${user?.barangay} Portal` : "Tubo Municipal Portal"}
+              </div>
+              <h2 className="text-4xl lg:text-5xl font-black text-slate-950 tracking-tighter">
+                {tabs.find((t) => t.id === tab)?.label || "Overview"}
+              </h2>
+              <p className="text-slate-500 font-bold mt-1">{today} {isAdminOrAbove && <ExportButton />}</p>
+            </div>
           </div>
         </header>
 
         {/* Content */}
-        <main className="p-5 space-y-5 max-w-screen-2xl">
+        <main className="px-10 pb-20 space-y-8 max-w-screen-2xl">
           {tab === "overview" && (
             <>
               {isAdminOrAbove && (
-                <div className="flex items-center gap-2">
-                  <MapPin size={14} className="text-green-600" />
+                <div className="flex items-center gap-3">
+                  <MapPin size={14} className="text-emerald-600" />
                   <select
-                    className="h-8 appearance-none rounded-full border border-gray-200 bg-white pl-3 pr-6 text-xs font-semibold text-gray-700 outline-none focus:border-green-400 transition shadow-sm"
+                    className="h-10 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-4 pr-8 text-xs font-black text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition shadow-sm"
                     value={overviewBarangay}
                     onChange={(e) => setOverviewBarangay(e.target.value)}
                   >
@@ -186,7 +193,7 @@ export default function Page() {
                   {overviewBarangay !== "All" && (
                     <button
                       onClick={() => setOverviewBarangay("All")}
-                      className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold text-green-700 hover:bg-green-200 transition"
+                      className="rounded-[1.5rem] bg-emerald-100 px-3 py-1.5 text-[10px] font-black text-emerald-700 hover:bg-emerald-200 transition uppercase tracking-widest"
                     >
                       Clear
                     </button>
@@ -194,6 +201,7 @@ export default function Page() {
                 </div>
               )}
               <KpiCards barangayFilter={overviewBarangay} />
+              <FindingMatrix barangayFilter={overviewBarangay} />
               <DailySummaryCalendar barangayFilter={overviewBarangay} />
               {isAdminOrAbove && <BarangayLeaderboard barangayFilter={overviewBarangay} />}
               <CommodityAnalytics barangayFilter={overviewBarangay} />
@@ -208,7 +216,6 @@ export default function Page() {
         </main>
       </div>
 
-      {/* Password Change Dialog */}
       <PasswordChangeDialog open={pwDialogOpen} onClose={() => setPwDialogOpen(false)} />
     </div>
   );

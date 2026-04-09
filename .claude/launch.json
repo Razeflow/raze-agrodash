@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "agri-dashboard",
-      "runtimeExecutable": "C:\\Windows\\System32\\cmd.exe",
-      "runtimeArgs": ["/c", "node_modules\\.bin\\next.cmd dev -p 4600"],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "-p", "4600"],
       "port": 4600
     }
   ]

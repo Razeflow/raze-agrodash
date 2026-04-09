@@ -49,19 +49,22 @@ export default function PasswordChangeDialog({ open, onClose }: Props) {
     onClose();
   }
 
+  const inputCls = "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
+  const labelCls = "mb-1 block text-xs font-black uppercase tracking-widest text-slate-500";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/30" onClick={handleClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={handleClose} />
+      <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl">
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="rounded-full bg-green-100 p-2">
+            <div className="p-3 rounded-2xl bg-green-100">
               <KeyRound size={18} className="text-green-600" />
             </div>
             <h2 className="text-lg font-bold text-gray-800">Change Password</h2>
           </div>
-          <button onClick={handleClose} className="rounded-lg p-1 hover:bg-gray-100 transition">
+          <button onClick={handleClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
             <X size={18} className="text-gray-400" />
           </button>
         </div>
@@ -74,42 +77,42 @@ export default function PasswordChangeDialog({ open, onClose }: Props) {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-600">
+              <div className="rounded-2xl bg-red-50/70 border border-red-200/50 px-3 py-2 text-sm text-red-600">
                 {error}
               </div>
             )}
 
             <div>
-              <label className="mb-1 block text-xs font-semibold text-gray-600">Current Password</label>
+              <label className={labelCls}>Current Password</label>
               <input
                 type="password"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-400 focus:outline-none focus:ring-1 focus:ring-green-400"
+                className={inputCls}
                 placeholder="Enter current password"
                 required
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-semibold text-gray-600">New Password</label>
+              <label className={labelCls}>New Password</label>
               <input
                 type="password"
                 value={newPw}
                 onChange={(e) => setNewPw(e.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-400 focus:outline-none focus:ring-1 focus:ring-green-400"
+                className={inputCls}
                 placeholder="Min 4 characters"
                 required
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-semibold text-gray-600">Confirm New Password</label>
+              <label className={labelCls}>Confirm New Password</label>
               <input
                 type="password"
                 value={confirmPw}
                 onChange={(e) => setConfirmPw(e.target.value)}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-400 focus:outline-none focus:ring-1 focus:ring-green-400"
+                className={inputCls}
                 placeholder="Re-enter new password"
                 required
               />
@@ -119,14 +122,14 @@ export default function PasswordChangeDialog({ open, onClose }: Props) {
               <button
                 type="button"
                 onClick={handleClose}
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition"
+                className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={loading}
-                className="rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 transition disabled:opacity-50"
+                className="rounded-[1.5rem] bg-emerald-600 px-5 py-2 text-sm font-black text-white shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition disabled:opacity-50"
               >
                 {loading ? "Changing..." : "Change Password"}
               </button>

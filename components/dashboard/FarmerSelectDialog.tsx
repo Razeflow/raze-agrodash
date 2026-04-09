@@ -45,14 +45,16 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+      <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <UserCheck size={18} className="text-green-600" />
+            <div className="p-3 rounded-2xl bg-green-100">
+              <UserCheck size={18} className="text-green-600" />
+            </div>
             <h2 className="text-lg font-bold text-gray-800">Select Farmers</h2>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100 transition">
+          <button onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
             <X size={18} className="text-gray-400" />
           </button>
         </div>
@@ -64,7 +66,7 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
         <div className="relative mb-3">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
-            className="w-full h-8 rounded-full border border-gray-200 bg-gray-50 pl-8 pr-3 text-xs text-gray-700 placeholder-gray-400 outline-none focus:border-green-400 focus:bg-white transition"
+            className="w-full h-8 rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur pl-8 pr-3 text-xs text-gray-700 placeholder-gray-400 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition"
             placeholder="Search farmers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -82,13 +84,13 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
             filtered.map((f) => (
               <label
                 key={f.id}
-                className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition ${checked.has(f.id) ? "bg-green-50" : "hover:bg-gray-50"}`}
+                className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 transition ${checked.has(f.id) ? "bg-emerald-50/70" : "hover:bg-slate-50"}`}
               >
                 <input
                   type="checkbox"
                   checked={checked.has(f.id)}
                   onChange={() => toggle(f.id)}
-                  className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                 />
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-700">{f.name}</p>
@@ -102,8 +104,8 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
         <div className="flex items-center justify-between">
           <span className="text-xs text-gray-400">{checked.size} selected</span>
           <div className="flex gap-3">
-            <button onClick={onClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition">Cancel</button>
-            <button onClick={handleConfirm} className="rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 transition">Confirm</button>
+            <button onClick={onClose} className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition">Cancel</button>
+            <button onClick={handleConfirm} className="rounded-[1.5rem] bg-emerald-600 px-5 py-2 text-sm font-black text-white shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition">Confirm</button>
           </div>
         </div>
       </div>

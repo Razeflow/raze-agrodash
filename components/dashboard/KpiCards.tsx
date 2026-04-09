@@ -4,9 +4,6 @@ import { useAgriData } from "@/lib/agri-context";
 import { COMMODITY_COLORS } from "@/lib/data";
 import { Users, Wheat, MapPin, AlertTriangle, Trophy } from "lucide-react";
 
-const kpiCardStyle = () =>
-  `ui-card relative overflow-hidden p-5 transition-shadow hover:shadow-md`;
-
 export default function KpiCards({ barangayFilter }: { barangayFilter?: string }) {
   const { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity, records, farmers } = useAgriData();
 
@@ -42,7 +39,6 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
       sub: `${stats.totalFarmers.male.toLocaleString()} male · ${stats.totalFarmers.female.toLocaleString()} female`,
       icon: Users,
       color: "#16a34a",
-      bg: "#f0faf0",
       delay: "",
     },
     {
@@ -51,7 +47,6 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
       sub: `${stats.totalProduction.bags.toLocaleString()} bags (40 kg/bag)`,
       icon: Wheat,
       color: "#ca8a04",
-      bg: "#fefce8",
       delay: "delay-1",
     },
     {
@@ -60,7 +55,6 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
       sub: "Across all commodities",
       icon: MapPin,
       color: "#0284c7",
-      bg: "#f0f9ff",
       delay: "delay-2",
     },
     {
@@ -69,7 +63,6 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
       sub: "Pests, diseases & calamities",
       icon: AlertTriangle,
       color: "#dc2626",
-      bg: "#fff1f1",
       delay: "delay-3",
     },
     {
@@ -78,46 +71,37 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
       sub: "Highest production output",
       icon: Trophy,
       color: topColor,
-      bg: "#faf8ff",
       delay: "delay-4",
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-6 lg:grid-cols-5">
       {cards.map((c) => (
-        <div key={c.label} className={`${kpiCardStyle()} fade-up ${c.delay}`}>
+        <div
+          key={c.label}
+          className={`group bg-white/70 backdrop-blur-xl border border-white/40 rounded-[2rem] p-6 shadow-lg shadow-slate-200/50 hover:shadow-2xl hover:shadow-emerald-100/50 transition-all duration-500 fade-up ${c.delay}`}
+        >
           <div
-            className="absolute left-0 top-0 h-full w-1 rounded-l-2xl"
-            style={{ background: c.color }}
-          />
-          <div className="pl-1">
-            <div
-              className="mb-3 inline-flex items-center justify-center rounded-xl p-2"
-              style={{ background: c.bg }}
-            >
-              <c.icon size={18} style={{ color: c.color }} />
-            </div>
-            <p
-              className="text-xs font-semibold uppercase tracking-widest"
-              style={{ color: "var(--text-soft)" }}
-            >
-              {c.label}
-            </p>
-            <p
-              className="mt-1 text-2xl font-bold leading-tight"
-              style={{
-                fontFamily: "Space Mono, monospace",
-                color: "var(--text)",
-                fontSize: c.label === "Top Commodity" ? "1.1rem" : undefined,
-              }}
-            >
-              {c.value}
-            </p>
-            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-              {c.sub}
-            </p>
+            className="mb-3 inline-flex items-center justify-center p-3 bg-white border border-slate-100 rounded-2xl shadow-sm group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300"
+          >
+            <c.icon size={18} style={{ color: c.color }} className="group-hover:!text-white transition-colors duration-300" />
           </div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+            {c.label}
+          </p>
+          <p
+            className="mt-1 text-2xl font-black leading-tight text-slate-900"
+            style={{
+              fontFamily: "Space Mono, monospace",
+              fontSize: c.label === "Top Commodity" ? "1.1rem" : undefined,
+            }}
+          >
+            {c.value}
+          </p>
+          <p className="mt-1 text-xs font-medium text-slate-400">
+            {c.sub}
+          </p>
         </div>
       ))}
     </div>

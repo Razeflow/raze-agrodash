@@ -3,6 +3,14 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Download, FileText, Table2, CalendarDays, MapPin, Printer, FileBarChart } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
 import { MONTH_NAMES } from "@/lib/data";
+
+function SectionLabel({ text }: { text: string }) {
+  return (
+    <div className="px-3 pt-2 pb-1">
+      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{text}</span>
+    </div>
+  );
+}
 import { openPrintableReport } from "@/lib/print-report";
 
 function downloadBlob(content: string, filename: string, type: string) {
@@ -124,29 +132,22 @@ export default function ExportButton() {
     setOpen(false);
   }
 
-  // ── Section Label ──────────────────────────────────────────────────────
-  const SectionLabel = ({ text }: { text: string }) => (
-    <div className="px-3 pt-2 pb-1">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-300">{text}</span>
-    </div>
-  );
-
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition"
+        className="flex items-center gap-1.5 rounded-[1.5rem] bg-white/50 backdrop-blur border border-white/40 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-white/70 transition"
       >
         <Download size={13} /> Export
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border border-gray-100 bg-white py-1 shadow-lg z-50">
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-[2rem] bg-white/90 backdrop-blur-xl border border-white/40 py-1 shadow-2xl z-50">
           {/* Month picker */}
-          <div className="px-3 py-2 border-b border-gray-100">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-300">Period</label>
+          <div className="px-3 py-2 border-b border-white/40">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Period</label>
             <select
-              className="mt-1 w-full appearance-none rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-green-400 transition"
+              className="mt-1 w-full appearance-none rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition"
               value={exportMonth}
               onChange={(e) => setExportMonth(e.target.value)}
             >
@@ -155,33 +156,33 @@ export default function ExportButton() {
             </select>
           </div>
           <SectionLabel text="CSV Downloads" />
-          <button onClick={exportRecordsCSV} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-green-50 transition">
+          <button onClick={exportRecordsCSV} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
             <Table2 size={14} className="text-green-600" /> Records CSV
           </button>
-          <button onClick={exportFarmersCSV} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-green-50 transition">
+          <button onClick={exportFarmersCSV} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
             <FileText size={14} className="text-blue-600" /> Farmers CSV
           </button>
-          <button onClick={exportMonthlySummaryCSV} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-green-50 transition">
+          <button onClick={exportMonthlySummaryCSV} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
             <CalendarDays size={14} className="text-orange-600" /> Monthly Summary CSV
           </button>
-          <button onClick={exportBarangaySummaryCSV} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-green-50 transition">
+          <button onClick={exportBarangaySummaryCSV} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
             <MapPin size={14} className="text-red-600" /> Barangay Summary CSV
           </button>
 
-          <div className="mx-2 my-1.5 border-t border-gray-100" />
+          <div className="mx-2 my-1.5 border-t border-white/40" />
 
           <SectionLabel text="Printable Reports" />
-          <button onClick={() => printReport("monthly")} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-blue-50 transition">
-            <Printer size={14} className="text-blue-600" /> 📅 Monthly Report
+          <button onClick={() => printReport("monthly")} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
+            <Printer size={14} className="text-blue-600" /> Monthly Report
           </button>
-          <button onClick={() => printReport("quarterly")} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-purple-50 transition">
-            <FileBarChart size={14} className="text-purple-600" /> 📊 Quarterly Report
+          <button onClick={() => printReport("quarterly")} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
+            <FileBarChart size={14} className="text-purple-600" /> Quarterly Report
           </button>
-          <button onClick={() => printReport("yearly")} className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-600 hover:bg-teal-50 transition">
-            <CalendarDays size={14} className="text-teal-600" /> 📆 Yearly Report
+          <button onClick={() => printReport("yearly")} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-gray-600 hover:bg-emerald-50 transition">
+            <CalendarDays size={14} className="text-teal-600" /> Yearly Report
           </button>
-          <button onClick={() => printReport("full")} className="flex w-full items-center gap-2 px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-50 transition">
-            <Printer size={14} className="text-green-600" /> 🖨️ Full Summary Report
+          <button onClick={() => printReport("full")} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-green-700 hover:bg-emerald-50 transition">
+            <Printer size={14} className="text-green-600" /> Full Summary Report
           </button>
         </div>
       )}

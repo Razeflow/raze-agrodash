@@ -5,6 +5,17 @@ import {
 } from "recharts";
 import { useAgriData } from "@/lib/agri-context";
 import { COMMODITY_COLORS } from "@/lib/data";
+import BentoCard from "@/components/ui/BentoCard";
+import { Warehouse } from "lucide-react";
+
+const tooltipStyle = {
+  borderRadius: "1.5rem",
+  border: "1px solid rgba(255,255,255,0.4)",
+  background: "rgba(255,255,255,0.95)",
+  backdropFilter: "blur(20px)",
+  fontSize: 12,
+  boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+};
 
 const COMMODITIES = ["Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"] as const;
 
@@ -28,22 +39,17 @@ export default function SubCategoryAnalytics({ barangayFilter }: { barangayFilte
   }, [records, active]);
 
   return (
-    <div className="fade-up delay-2 rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-widest text-gray-400">
-        Sub-Category Breakdown
-      </h2>
-      <p className="mb-4 text-xs text-gray-400">Production per variety / type</p>
-
-      <div className="mb-5 flex flex-wrap gap-2">
+    <BentoCard title="Sub-Category Breakdown" subtitle="Production per variety / type" icon={Warehouse} className="fade-up delay-2">
+      <div className="mb-6 flex flex-wrap gap-3">
         {COMMODITIES.map((c) => (
           <button
             key={c}
             onClick={() => setActive(c)}
-            className="rounded-full px-3 py-1 text-xs font-semibold transition-all"
+            className="rounded-[1.5rem] px-5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all border"
             style={
               active === c
-                ? { background: COMMODITY_COLORS[c], color: "#fff" }
-                : { background: "#f3f4f6", color: "#555" }
+                ? { background: COMMODITY_COLORS[c], color: "#fff", borderColor: COMMODITY_COLORS[c], boxShadow: `0 10px 25px -5px ${COMMODITY_COLORS[c]}33` }
+                : { background: "rgba(255,255,255,0.5)", color: "#94a3b8", borderColor: "rgba(255,255,255,0.4)" }
             }
           >
             {c}
@@ -52,16 +58,16 @@ export default function SubCategoryAnalytics({ barangayFilter }: { barangayFilte
       </div>
 
       {subData.length === 0 ? (
-        <p className="py-10 text-center text-sm text-gray-400">No {active} records yet.</p>
+        <p className="py-10 text-center text-sm font-bold text-slate-400">No {active} records yet.</p>
       ) : (
         <>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={subData} barSize={30} margin={{ top: 4, right: 12, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eef2ee" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: "#888", fontFamily: "Space Mono" }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid #eee", fontSize: 12 }} formatter={(v: any) => [`${v.toLocaleString()} bags`, "Output"]} />
-              <Bar dataKey="bags" radius={[6, 6, 0, 0]} fill={color}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 10, fill: "#94a3b8", fontFamily: "Space Mono" }} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${Number(v).toLocaleString()} bags`, "Output"]} />
+              <Bar dataKey="bags" radius={[8, 8, 0, 0]} fill={color}>
                 {subData.map((_, i) => (
                   <Cell key={i} fill={color} opacity={1 - i * 0.1} />
                 ))}
@@ -69,26 +75,26 @@ export default function SubCategoryAnalytics({ barangayFilter }: { barangayFilte
             </BarChart>
           </ResponsiveContainer>
 
-          <div className="mt-4 divide-y divide-gray-50">
+          <div className="mt-6 divide-y divide-slate-100/60">
             {subData.map((d) => (
-              <div key={d.name} className="flex items-center justify-between py-2">
-                <span className="text-xs text-gray-600">{d.name}</span>
+              <div key={d.name} className="flex items-center justify-between py-2.5">
+                <span className="text-xs font-bold text-slate-600">{d.name}</span>
                 <div className="flex items-center gap-3">
                   <div className="h-1.5 rounded-full" style={{
                     width: `${Math.round((d.bags / subData[0].bags) * 80)}px`,
                     background: color,
                     opacity: 0.3,
                   }} />
-                  <span className="w-16 text-right text-xs font-semibold" style={{ fontFamily: "Space Mono", color }}>
+                  <span className="w-16 text-right text-xs font-black" style={{ fontFamily: "Space Mono", color }}>
                     {d.bags.toLocaleString()}
                   </span>
-                  <span className="w-12 text-right text-xs text-gray-400">{d.tons} MT</span>
+                  <span className="w-12 text-right text-xs font-medium text-slate-400">{d.tons} MT</span>
                 </div>
               </div>
             ))}
           </div>
         </>
       )}
-    </div>
+    </BentoCard>
   );
 }

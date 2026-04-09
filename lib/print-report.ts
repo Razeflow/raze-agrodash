@@ -1,5 +1,5 @@
 import type { AgriRecord, Farmer } from "./data";
-import { BARANGAYS, COMMODITY_COLORS, COMMODITY_OPTIONS } from "./data";
+import { BARANGAYS, COMMODITY_COLORS } from "./data";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ReportData = {
@@ -84,7 +84,7 @@ function pieChartSVG(
     startAngle = endAngle;
   });
 
-  const legend = filtered.map((d, i) => {
+  const legend = filtered.map((d) => {
     const pct = ((d.value / total) * 100).toFixed(1);
     return `<div style="display:flex;align-items:center;gap:6px;font-size:10px;color:#374151;">
       <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${d.color};flex-shrink:0;"></span>
