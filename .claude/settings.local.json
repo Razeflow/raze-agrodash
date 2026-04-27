@@ -3,7 +3,8 @@
     "allow": [
       "Read(//c/Users/hkaku/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/5faa6dca-d92f-4e54-afbf-f9d654fc6001/4542782a-48c3-446c-bee5-0384ff9d38f3/skills/docx/**)",
       "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\hkaku\\\\Downloads\\\\Agri_Dashboard_Documentation_v2.docx\" /tmp/agri_unpacked/)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npx next:*)"
     ]
   }
 }

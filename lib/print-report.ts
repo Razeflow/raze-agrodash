@@ -1,5 +1,5 @@
 import type { AgriRecord, Farmer } from "./data";
-import { BARANGAYS, COMMODITY_COLORS } from "./data";
+import { BARANGAYS, COMMODITY_COLORS, CALAMITY_SUB_CATEGORY_LABELS } from "./data";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ReportData = {
@@ -232,17 +232,22 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
 
     const recordRows = brgyRecs.map((r) => {
       const dmg = r.damage_pests_hectares + r.damage_calamity_hectares;
+      const calType = r.calamity_sub_category === "None" ? "—" : CALAMITY_SUB_CATEGORY_LABELS[r.calamity_sub_category];
+      const calEvt = r.calamity === "None" ? "—" : r.calamity;
       return [
         r.commodity, r.sub_category, String(r.total_farmers),
         r.commodity === "Fishery" ? "—" : r.planting_area_hectares.toFixed(2),
         r.commodity === "Fishery" ? `${r.harvesting_fishery}` : r.harvesting_output_bags.toLocaleString(),
         dmg > 0 ? dmg.toFixed(2) : "—",
         r.pests_diseases === "None" ? "—" : r.pests_diseases,
+        calType,
+        calEvt,
       ];
     });
 
     const farmerRows = brgyFarmerList.map((f, i) => [
       String(i + 1), f.name, f.gender,
+      f.rsbsa_number || "—",
       new Date(f.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
     ]);
 
@@ -257,8 +262,8 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
         <div class="stat"><strong>${bs.damage.toFixed(1)} ha</strong>Damaged</div>
       </div>
       ${barChartSVG(brgyComData, `${bs.name} — Production by Commodity (bags)`, 500, 220)}
-      ${brgyRecs.length > 0 ? `<h3>Commodity Records</h3>${tableHTML(["Commodity", "Variety", "Farmers", "Area (ha)", "Harvest", "Damage (ha)", "Pests"], recordRows)}` : ""}
-      ${brgyFarmerList.length > 0 ? `<h3>Farmer Roster</h3>${tableHTML(["#", "Name", "Gender", "Registered"], farmerRows)}` : ""}
+      ${brgyRecs.length > 0 ? `<h3>Commodity Records</h3>${tableHTML(["Commodity", "Variety", "Farmers", "Area (ha)", "Harvest", "Damage (ha)", "Pests", "Calamity type", "Calamity event"], recordRows)}` : ""}
+      ${brgyFarmerList.length > 0 ? `<h3>Farmer Roster</h3>${tableHTML(["#", "Name", "Gender", "RSBSA", "Registered"], farmerRows)}` : ""}
     `;
   }
 

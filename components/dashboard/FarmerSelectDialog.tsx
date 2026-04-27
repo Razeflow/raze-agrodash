@@ -2,6 +2,8 @@
 import { useState, useMemo } from "react";
 import { X, Search, UserCheck } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import DialogPortal from "@/components/ui/DialogPortal";
 
 type Props = {
   open: boolean;
@@ -13,6 +15,7 @@ type Props = {
 
 export default function FarmerSelectDialog({ open, onClose, barangay, selectedIds, onConfirm }: Props) {
   const { farmers } = useAgriData();
+  const { mounted, visible } = useAnimatedMount(open);
   const [search, setSearch] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set(selectedIds));
 
@@ -27,7 +30,7 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
 
   const allFarmersForBarangay = useMemo(() => farmers.filter((f) => f.barangay === barangay), [farmers, barangay]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   function toggle(id: string) {
     setChecked((prev) => {
@@ -44,9 +47,11 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl">
+    <DialogPortal>
+    <div className="fixed inset-0 lg:left-24 z-[60] overflow-y-auto">
+      <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className={`relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-3 rounded-2xl bg-green-100">
@@ -92,6 +97,14 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
                   onChange={() => toggle(f.id)}
                   className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                 />
+                {f.photo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={f.photo_url} alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-400">
+                    {f.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-700">{f.name}</p>
                   <p className="text-xs text-gray-400">{f.gender}</p>
@@ -109,6 +122,8 @@ export default function FarmerSelectDialog({ open, onClose, barangay, selectedId
           </div>
         </div>
       </div>
+      </div>
     </div>
+    </DialogPortal>
   );
 }

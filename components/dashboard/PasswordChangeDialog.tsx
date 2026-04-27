@@ -2,11 +2,14 @@
 import { useState } from "react";
 import { X, KeyRound, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import DialogPortal from "@/components/ui/DialogPortal";
 
 type Props = { open: boolean; onClose: () => void };
 
 export default function PasswordChangeDialog({ open, onClose }: Props) {
   const { changePassword } = useAuth();
+  const { mounted, visible } = useAnimatedMount(open);
   const [current, setCurrent] = useState("");
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -14,7 +17,7 @@ export default function PasswordChangeDialog({ open, onClose }: Props) {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,9 +56,11 @@ export default function PasswordChangeDialog({ open, onClose }: Props) {
   const labelCls = "mb-1 block text-xs font-black uppercase tracking-widest text-slate-500";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={handleClose} />
-      <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl">
+    <DialogPortal>
+    <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
+      <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={handleClose} />
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className={`relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -137,6 +142,8 @@ export default function PasswordChangeDialog({ open, onClose }: Props) {
           </form>
         )}
       </div>
+      </div>
     </div>
+    </DialogPortal>
   );
 }

@@ -1,5 +1,10 @@
--- Full schema reference (greenfield). For existing DBs use migrations/001_households_orgs.sql
--- Storage: see migrations/STORAGE.md
+-- AgriDash: Complete database setup (schema + all migrations + grants)
+-- Paste this entire file into the Supabase SQL Editor and run it once.
+-- Safe to re-run: uses IF NOT EXISTS / DROP IF EXISTS throughout.
+
+-- =====================================================================
+-- 1) TABLES
+-- =====================================================================
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -60,7 +65,6 @@ CREATE TABLE IF NOT EXISTS public.farmers (
   gender TEXT NOT NULL CHECK (gender IN ('Male', 'Female')),
   barangay TEXT NOT NULL,
   household_id UUID REFERENCES public.households(id) ON DELETE SET NULL,
-  is_household_head BOOLEAN NOT NULL DEFAULT false,
   rsbsa_number TEXT,
   birth_date DATE,
   civil_status TEXT,
@@ -71,6 +75,10 @@ CREATE TABLE IF NOT EXISTS public.farmers (
 
 CREATE INDEX IF NOT EXISTS idx_farmers_barangay ON public.farmers(barangay);
 CREATE INDEX IF NOT EXISTS idx_farmers_household_id ON public.farmers(household_id);
+
+-- Migration 005: household head flag
+ALTER TABLE public.farmers
+  ADD COLUMN IF NOT EXISTS is_household_head BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.farmer_organizations (
   farmer_id UUID NOT NULL REFERENCES public.farmers(id) ON DELETE CASCADE,
@@ -98,13 +106,20 @@ CREATE TABLE IF NOT EXISTS public.agri_records (
   harvesting_fishery DOUBLE PRECISION DEFAULT 0,
   pests_diseases TEXT DEFAULT 'None',
   calamity TEXT DEFAULT 'None',
-  calamity_sub_category TEXT NOT NULL DEFAULT 'None',
   remarks TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Migration 003: calamity sub-category
+ALTER TABLE public.agri_records
+  ADD COLUMN IF NOT EXISTS calamity_sub_category TEXT NOT NULL DEFAULT 'None';
+
 CREATE INDEX IF NOT EXISTS idx_agri_records_barangay ON public.agri_records(barangay);
+
+-- =====================================================================
+-- 2) ROW LEVEL SECURITY
+-- =====================================================================
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.farmers ENABLE ROW LEVEL SECURITY;
@@ -113,6 +128,10 @@ ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.households ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.household_subsidies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.farmer_organizations ENABLE ROW LEVEL SECURITY;
+
+-- =====================================================================
+-- 3) HELPER FUNCTIONS
+-- =====================================================================
 
 CREATE OR REPLACE FUNCTION public.get_user_role()
 RETURNS TEXT AS $$
@@ -124,6 +143,11 @@ RETURNS TEXT AS $$
   SELECT barangay FROM public.profiles WHERE id = auth.uid();
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
+-- =====================================================================
+-- 4) RLS POLICIES
+-- =====================================================================
+
+-- profiles
 DROP POLICY IF EXISTS "profiles_select" ON public.profiles;
 CREATE POLICY "profiles_select" ON public.profiles
   FOR SELECT TO authenticated USING (true);
@@ -132,6 +156,7 @@ DROP POLICY IF EXISTS "profiles_update_own" ON public.profiles;
 CREATE POLICY "profiles_update_own" ON public.profiles
   FOR UPDATE TO authenticated USING (id = auth.uid());
 
+-- organizations (migration 004: admin-only insert/update/delete)
 DROP POLICY IF EXISTS "organizations_select" ON public.organizations;
 CREATE POLICY "organizations_select" ON public.organizations
   FOR SELECT TO authenticated
@@ -156,6 +181,7 @@ CREATE POLICY "organizations_delete" ON public.organizations
   FOR DELETE TO authenticated
   USING (public.get_user_role() IN ('SUPER_ADMIN', 'ADMIN'));
 
+-- households
 DROP POLICY IF EXISTS "households_select" ON public.households;
 CREATE POLICY "households_select" ON public.households
   FOR SELECT TO authenticated
@@ -188,6 +214,7 @@ CREATE POLICY "households_delete" ON public.households
     OR barangay = public.get_user_barangay()
   );
 
+-- household_subsidies
 DROP POLICY IF EXISTS "household_subsidies_select" ON public.household_subsidies;
 CREATE POLICY "household_subsidies_select" ON public.household_subsidies
   FOR SELECT TO authenticated
@@ -254,6 +281,7 @@ CREATE POLICY "household_subsidies_delete" ON public.household_subsidies
     )
   );
 
+-- farmers
 DROP POLICY IF EXISTS "farmers_select" ON public.farmers;
 CREATE POLICY "farmers_select" ON public.farmers
   FOR SELECT TO authenticated
@@ -286,6 +314,7 @@ CREATE POLICY "farmers_delete" ON public.farmers
     OR barangay = public.get_user_barangay()
   );
 
+-- farmer_organizations
 DROP POLICY IF EXISTS "fo_select" ON public.farmer_organizations;
 CREATE POLICY "fo_select" ON public.farmer_organizations
   FOR SELECT TO authenticated
@@ -328,6 +357,7 @@ CREATE POLICY "fo_delete" ON public.farmer_organizations
     )
   );
 
+-- agri_records
 DROP POLICY IF EXISTS "records_select" ON public.agri_records;
 CREATE POLICY "records_select" ON public.agri_records
   FOR SELECT TO authenticated
@@ -360,9 +390,87 @@ CREATE POLICY "records_delete" ON public.agri_records
     OR barangay = public.get_user_barangay()
   );
 
-ALTER PUBLICATION supabase_realtime ADD TABLE public.agri_records;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.farmers;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.organizations;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.households;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.farmer_organizations;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.household_subsidies;
+-- =====================================================================
+-- 5) REALTIME (wrapped so duplicates don't crash the script)
+-- =====================================================================
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.agri_records;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.farmers;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.organizations;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.households;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.farmer_organizations;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.household_subsidies;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- =====================================================================
+-- 6) AUTO-PROFILE TRIGGER (migration 006)
+-- =====================================================================
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, username, display_name, role)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1)),
+    COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1)),
+    COALESCE(NEW.raw_user_meta_data->>'role', 'BARANGAY_USER')
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Backfill: create SUPER_ADMIN profile for any existing auth users missing one
+INSERT INTO public.profiles (id, username, display_name, role, barangay)
+SELECT
+  id,
+  COALESCE(raw_user_meta_data->>'username', split_part(email, '@', 1)),
+  COALESCE(raw_user_meta_data->>'display_name', split_part(email, '@', 1)),
+  'SUPER_ADMIN',
+  NULL
+FROM auth.users
+WHERE id NOT IN (SELECT id FROM public.profiles)
+ON CONFLICT (id) DO NOTHING;
+
+-- =====================================================================
+-- 7) GRANTS (fixes PGRST205 — PostgREST needs these to see the tables)
+-- =====================================================================
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+
+-- =====================================================================
+-- 8) RELOAD PostgREST schema cache
+-- =====================================================================
+
+NOTIFY pgrst, 'reload schema';

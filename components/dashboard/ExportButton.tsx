@@ -2,7 +2,8 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Download, FileText, Table2, CalendarDays, MapPin, Printer, FileBarChart } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
-import { MONTH_NAMES } from "@/lib/data";
+import { MONTH_NAMES, formatHouseholdSubsidySummary } from "@/lib/data";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 
 function SectionLabel({ text }: { text: string }) {
   return (
@@ -32,8 +33,10 @@ function groupBy<T>(arr: T[], keyFn: (item: T) => string): Record<string, T[]> {
 }
 
 export default function ExportButton() {
-  const { records, farmers } = useAgriData();
+  const { records, farmers, getHousehold, organizations, getOrganizationIdsForFarmer, getSubsidiesForHousehold } =
+    useAgriData();
   const [open, setOpen] = useState(false);
+  const dropdown = useAnimatedMount(open, 200);
   const [exportMonth, setExportMonth] = useState("all");
   const ref = useRef<HTMLDivElement>(null);
 
@@ -72,13 +75,13 @@ export default function ExportButton() {
 
   // ── CSV Exports ────────────────────────────────────────────────────────
   function exportRecordsCSV() {
-    const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest (bags)", "Damage Pests (ha)", "Damage Calamity (ha)", "Pests/Diseases", "Calamity", "Remarks", "Created"];
+    const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest (bags)", "Damage Pests (ha)", "Damage Calamity (ha)", "Pests/Diseases", "CalamitySubCategory", "CalamityEvent", "Remarks", "Created"];
     const rows = filteredRecords.map((r) => [
       r.barangay, r.commodity, r.sub_category,
       r.farmer_male, r.farmer_female, r.total_farmers,
       r.planting_area_hectares, r.harvesting_output_bags,
       r.damage_pests_hectares, r.damage_calamity_hectares,
-      `"${r.pests_diseases}"`, `"${r.calamity}"`, `"${r.remarks}"`,
+      `"${r.pests_diseases}"`, r.calamity_sub_category, `"${r.calamity}"`, `"${r.remarks}"`,
       r.created_at.slice(0, 10),
     ].join(","));
     downloadBlob([headers.join(","), ...rows].join("\n"), `agridash-records${fileSuffix}.csv`, "text/csv");
@@ -86,10 +89,33 @@ export default function ExportButton() {
   }
 
   function exportFarmersCSV() {
-    const headers = ["Name", "Gender", "Barangay", "Registered"];
-    const rows = farmers.map((f) => [
-      `"${f.name}"`, f.gender, f.barangay, f.created_at.slice(0, 10),
-    ].join(","));
+    const headers = [
+      "Name", "Gender", "Barangay", "RSBSA", "BirthDate", "CivilStatus",
+      "HouseholdId", "HouseholdName", "HouseholdHead", "SubsidySummary", "Organizations", "PhotoURL", "Registered",
+    ];
+    const rows = farmers.map((f) => {
+      const hh = f.household_id ? getHousehold(f.household_id) : null;
+      const subsidySummary = hh ? formatHouseholdSubsidySummary(getSubsidiesForHousehold(hh.id)) : "";
+      const orgNames = getOrganizationIdsForFarmer(f.id)
+        .map((oid) => organizations.find((o) => o.id === oid)?.name)
+        .filter(Boolean)
+        .join("; ");
+      return [
+        `"${f.name.replace(/"/g, '""')}"`,
+        f.gender,
+        f.barangay,
+        f.rsbsa_number || "",
+        f.birth_date || "",
+        f.civil_status || "",
+        f.household_id || "",
+        hh ? `"${(hh.display_name || "").replace(/"/g, '""')}"` : "",
+        f.is_household_head ? "yes" : "no",
+        `"${subsidySummary.replace(/"/g, '""')}"`,
+        `"${orgNames.replace(/"/g, '""')}"`,
+        f.photo_url || "",
+        f.created_at.slice(0, 10),
+      ].join(",");
+    });
     downloadBlob([headers.join(","), ...rows].join("\n"), "agridash-farmers.csv", "text/csv");
     setOpen(false);
   }
@@ -141,8 +167,8 @@ export default function ExportButton() {
         <Download size={13} /> Export
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 rounded-[2rem] bg-white/90 backdrop-blur-xl border border-white/40 py-1 shadow-2xl z-50">
+      {dropdown.mounted && (
+        <div className={`absolute right-0 top-full mt-1 w-56 rounded-[2rem] bg-white/90 backdrop-blur-xl border border-white/40 py-1 shadow-2xl z-50 dropdown-animate ${dropdown.visible ? "dropdown-animate-visible" : ""}`}>
           {/* Month picker */}
           <div className="px-3 py-2 border-b border-white/40">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Period</label>

@@ -1,22 +1,109 @@
 "use client";
 import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
-import type { AgriRecord, Farmer } from "./data";
-import { BARANGAYS } from "./data";
+import {
+  isSubsidyCategory,
+  type AgriRecord,
+  type Farmer,
+  type Household,
+  type HouseholdSubsidy,
+  type Organization,
+  type FarmerOrganizationRow,
+  type OrgType,
+  type SubsidyCategory,
+} from "./data";
+import { BARANGAYS, normalizeCalamitySubCategory } from "./data";
 import { useAuth } from "./auth-context";
-import { supabase } from "@/lib/supabase";
 
-// ── Context shape ────────────────────────────────────────────────────────────
+export type AddFarmerResult = { ok: true; id: string } | { ok: false; message: string };
+/** Optional display name when creating a new household from the farmer form (not stored on farmers row). */
+export type AddFarmerInput = Omit<Farmer, "id" | "created_at" | "updated_at"> & {
+  new_household_display_name?: string | null;
+};
+export type AddRecordResult = { ok: true } | { ok: false; message: string };
+export type MutationResult = { ok: true } | { ok: false; message: string };
+export type AddOrganizationResult =
+  | { ok: true; organization: Organization }
+  | { ok: false; message: string };
+export type AddHouseholdSubsidyResult =
+  | { ok: true; subsidy: HouseholdSubsidy }
+  | { ok: false; message: string };
+
+/* ── localStorage helpers ─────────────────────────────────────────── */
+
+const LS_RECORDS = "agridash-records";
+const LS_FARMERS = "agridash-farmers";
+const LS_HOUSEHOLDS = "agridash-households";
+const LS_ORGANIZATIONS = "agridash-organizations";
+const LS_FARMER_ORGS = "agridash-farmer-orgs";
+const LS_SUBSIDIES = "agridash-subsidies";
+
+function lsGet<T>(key: string): T[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
+}
+function lsSet<T>(key: string, data: T[]) {
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+/* ── context type ─────────────────────────────────────────────────── */
+
 type AgriContextValue = {
   records: AgriRecord[];
-  addRecord: (record: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">) => void;
-  updateRecord: (id: string, record: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">) => void;
+  addRecord: (
+    record: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">,
+  ) => Promise<AddRecordResult>;
+  updateRecord: (
+    id: string,
+    record: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">,
+  ) => Promise<MutationResult>;
   deleteRecord: (id: string) => void;
   farmers: Farmer[];
-  addFarmer: (farmer: Omit<Farmer, "id" | "created_at" | "updated_at">) => void;
-  updateFarmer: (id: string, farmer: Omit<Farmer, "id" | "created_at" | "updated_at">) => void;
-  deleteFarmer: (id: string) => void;
+  addFarmer: (farmer: AddFarmerInput) => Promise<AddFarmerResult>;
+  updateFarmer: (id: string, farmer: Omit<Farmer, "id" | "created_at" | "updated_at">) => Promise<MutationResult>;
+  deleteFarmer: (id: string) => Promise<void>;
   getFarmersByIds: (ids: string[]) => Farmer[];
   farmersByBarangay: Record<string, Farmer[]>;
+  households: Household[];
+  organizations: Organization[];
+  farmerOrganizations: FarmerOrganizationRow[];
+  getHousehold: (id: string | null) => Household | undefined;
+  addHousehold: (h: Omit<Household, "id" | "created_at" | "updated_at">) => Promise<Household | null>;
+  updateHousehold: (id: string, h: Partial<Omit<Household, "id" | "created_at" | "updated_at">>) => Promise<MutationResult>;
+  deleteHousehold: (id: string) => Promise<void>;
+  addOrganization: (o: Omit<Organization, "id" | "created_at" | "updated_at">) => Promise<AddOrganizationResult>;
+  updateOrganization: (id: string, o: Partial<Omit<Organization, "id" | "created_at" | "updated_at">>) => Promise<void>;
+  deleteOrganization: (id: string) => Promise<MutationResult>;
+  saveFarmerOrganizations: (farmerId: string, organizationIds: string[]) => Promise<MutationResult>;
+  householdSubsidies: HouseholdSubsidy[];
+  getSubsidiesForHousehold: (householdId: string) => HouseholdSubsidy[];
+  addHouseholdSubsidy: (row: {
+    household_id: string;
+    category: SubsidyCategory;
+    product_detail?: string | null;
+    quantity?: number | null;
+    unit?: string | null;
+    amount_php?: number | null;
+    program_source?: string | null;
+    received_date?: string | null;
+    notes?: string | null;
+  }) => Promise<AddHouseholdSubsidyResult>;
+  updateHouseholdSubsidy: (
+    id: string,
+    patch: Partial<{
+      category: SubsidyCategory;
+      product_detail: string | null;
+      quantity: number | null;
+      unit: string | null;
+      amount_php: number | null;
+      program_source: string | null;
+      received_date: string | null;
+      notes: string | null;
+    }>,
+  ) => Promise<MutationResult>;
+  deleteHouseholdSubsidy: (id: string) => Promise<MutationResult>;
+  getOrganizationIdsForFarmer: (farmerId: string) => string[];
+  organizationStats: { id: string; name: string; org_type: OrgType; memberCount: number }[];
+  uniqueFarmersInOrganizations: number;
   totalFarmers: { male: number; female: number; total: number };
   totalProduction: { bags: number; tons: number };
   totalPlantingArea: number;
@@ -38,8 +125,52 @@ type AgriContextValue = {
 
 const AgriContext = createContext<AgriContextValue | null>(null);
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 const validBarangays = new Set<string>(BARANGAYS);
+
+function normalizeHouseholdSubsidy(row: Record<string, unknown>): HouseholdSubsidy {
+  const catRaw = String(row.category ?? "other");
+  const category: SubsidyCategory = isSubsidyCategory(catRaw) ? catRaw : "other";
+  return {
+    id: String(row.id),
+    household_id: String(row.household_id ?? ""),
+    category,
+    product_detail: row.product_detail != null ? String(row.product_detail) : null,
+    quantity: row.quantity != null && row.quantity !== "" ? Number(row.quantity) : null,
+    unit: row.unit != null ? String(row.unit) : null,
+    amount_php: row.amount_php != null && row.amount_php !== "" ? Number(row.amount_php) : null,
+    program_source: row.program_source != null ? String(row.program_source) : null,
+    received_date: row.received_date != null ? String(row.received_date).slice(0, 10) : null,
+    notes: row.notes != null ? String(row.notes) : null,
+    created_at: String(row.created_at ?? ""),
+    updated_at: String(row.updated_at ?? ""),
+  };
+}
+
+function normalizeFarmer(row: Record<string, unknown>): Farmer {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    gender: (row.gender === "Female" ? "Female" : "Male") as Farmer["gender"],
+    barangay: String(row.barangay ?? ""),
+    household_id: row.household_id != null ? String(row.household_id) : null,
+    is_household_head: row.is_household_head === true,
+    rsbsa_number: row.rsbsa_number != null ? String(row.rsbsa_number) : null,
+    birth_date: row.birth_date != null ? String(row.birth_date).slice(0, 10) : null,
+    civil_status: row.civil_status != null ? String(row.civil_status) : null,
+    photo_url: row.photo_url != null ? String(row.photo_url) : null,
+    created_at: String(row.created_at ?? ""),
+    updated_at: String(row.updated_at ?? ""),
+  };
+}
+
+function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
+  const r = row as unknown as AgriRecord;
+  return {
+    ...r,
+    farmer_ids: r.farmer_ids || [],
+    calamity_sub_category: normalizeCalamitySubCategory(row.calamity_sub_category),
+  };
+}
 
 function computeFarmerFields(farmerIds: string[], allFarmers: Farmer[]) {
   const linked = allFarmers.filter((f) => farmerIds.includes(f.id));
@@ -51,185 +182,450 @@ function computeFarmerFields(farmerIds: string[], allFarmers: Farmer[]) {
   };
 }
 
-// ── Provider ─────────────────────────────────────────────────────────────────
 export function AgriDataProvider({ children }: { children: ReactNode }) {
   const { isBarangayUser, userBarangay, isLoggedIn } = useAuth();
   const [records, setRecords] = useState<AgriRecord[]>([]);
   const [farmers, setFarmers] = useState<Farmer[]>([]);
+  const [households, setHouseholds] = useState<Household[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [farmerOrganizations, setFarmerOrganizations] = useState<FarmerOrganizationRow[]>([]);
+  const [householdSubsidies, setHouseholdSubsidies] = useState<HouseholdSubsidy[]>([]);
   const [, setLoaded] = useState(false);
 
-  // Keep a ref in sync so setRecords callbacks always read the latest farmers
   const farmersRef = useRef<Farmer[]>(farmers);
   useEffect(() => { farmersRef.current = farmers; }, [farmers]);
 
-  // ── Fetch from Supabase on mount & when login state changes ────────────
+  const recordsRef = useRef<AgriRecord[]>(records);
+  useEffect(() => { recordsRef.current = records; }, [records]);
+
+  /* ── Load from localStorage on login ──────────────────────────── */
   useEffect(() => {
     if (!isLoggedIn) {
       setRecords([]);
       setFarmers([]);
+      setHouseholds([]);
+      setOrganizations([]);
+      setFarmerOrganizations([]);
+      setHouseholdSubsidies([]);
       setLoaded(true);
       return;
     }
 
-    let cancelled = false;
+    try {
+      const rawRecords = lsGet<Record<string, unknown>>(LS_RECORDS);
+      setRecords(
+        rawRecords
+          .filter((r) => validBarangays.has(String(r.barangay)))
+          .map((r) => normalizeAgriRecord(r)),
+      );
 
-    async function fetchData() {
-      try {
-        const [recordsRes, farmersRes] = await Promise.all([
-          supabase.from('agri_records').select('*'),
-          supabase.from('farmers').select('*'),
-        ]);
+      const rawFarmers = lsGet<Record<string, unknown>>(LS_FARMERS);
+      setFarmers(rawFarmers.map(normalizeFarmer));
 
-        if (cancelled) return;
+      setHouseholds(lsGet<Household>(LS_HOUSEHOLDS));
+      setOrganizations(lsGet<Organization>(LS_ORGANIZATIONS));
+      setFarmerOrganizations(lsGet<FarmerOrganizationRow>(LS_FARMER_ORGS));
 
-        if (recordsRes.data) {
-          setRecords(recordsRes.data.filter((r: AgriRecord) => validBarangays.has(r.barangay)).map((r: AgriRecord) => ({ ...r, farmer_ids: r.farmer_ids || [] })));
-        }
-        if (farmersRes.data) {
-          setFarmers(farmersRes.data);
-        }
-      } catch (err) { console.error("[AgriData] fetch error:", err); }
-      if (!cancelled) setLoaded(true);
+      const rawSubs = lsGet<Record<string, unknown>>(LS_SUBSIDIES);
+      setHouseholdSubsidies(rawSubs.map(normalizeHouseholdSubsidy));
+    } catch (err) {
+      console.error("[AgriData] localStorage load error:", err);
     }
-
-    fetchData();
-    return () => { cancelled = true; };
+    setLoaded(true);
   }, [isLoggedIn]);
 
-  // ── Real-time subscriptions ────────────────────────────────────────────
-  useEffect(() => {
-    if (!isLoggedIn) return;
+  /* ── Memoised visible slices ──────────────────────────────────── */
 
-    const channel = supabase.channel('db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agri_records' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newRecord = payload.new as AgriRecord;
-          if (validBarangays.has(newRecord.barangay)) {
-            setRecords((prev) => prev.some((r) => r.id === newRecord.id) ? prev : [...prev, { ...newRecord, farmer_ids: newRecord.farmer_ids || [] }]);
-          }
-        } else if (payload.eventType === 'UPDATE') {
-          const updated = payload.new as AgriRecord;
-          setRecords((prev) => prev.map((r) => r.id === updated.id ? { ...updated, farmer_ids: updated.farmer_ids || [] } : r));
-        } else if (payload.eventType === 'DELETE') {
-          const deleted = payload.old as { id: string };
-          setRecords((prev) => prev.filter((r) => r.id !== deleted.id));
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'farmers' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newFarmer = payload.new as Farmer;
-          setFarmers((prev) => prev.some((f) => f.id === newFarmer.id) ? prev : [...prev, newFarmer]);
-        } else if (payload.eventType === 'UPDATE') {
-          const updated = payload.new as Farmer;
-          setFarmers((prev) => prev.map((f) => f.id === updated.id ? updated : f));
-        } else if (payload.eventType === 'DELETE') {
-          const deleted = payload.old as { id: string };
-          setFarmers((prev) => prev.filter((f) => f.id !== deleted.id));
-        }
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [isLoggedIn]);
-
-  // ── Role-based visibility ────────────────────────────────────────────────
   const vr = useMemo(
-    () => isBarangayUser && userBarangay ? records.filter((r) => r.barangay === userBarangay) : records,
-    [records, isBarangayUser, userBarangay]
+    () => (isBarangayUser && userBarangay ? records.filter((r) => r.barangay === userBarangay) : records),
+    [records, isBarangayUser, userBarangay],
   );
   const vf = useMemo(
-    () => isBarangayUser && userBarangay ? farmers.filter((f) => f.barangay === userBarangay) : farmers,
-    [farmers, isBarangayUser, userBarangay]
+    () => (isBarangayUser && userBarangay ? farmers.filter((f) => f.barangay === userBarangay) : farmers),
+    [farmers, isBarangayUser, userBarangay],
   );
 
-  // ── Record CRUD ──────────────────────────────────────────────────────────
-  async function addRecord(data: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">) {
-    const ff = computeFarmerFields(data.farmer_ids || [], farmersRef.current);
-    const payload = { ...data, ...ff, farmer_ids: data.farmer_ids || [] };
+  const vh = useMemo(
+    () => (isBarangayUser && userBarangay ? households.filter((h) => h.barangay === userBarangay) : households),
+    [households, isBarangayUser, userBarangay],
+  );
 
-    const { data: inserted, error } = await supabase.from('agri_records').insert(payload).select().single();
-    if (!error && inserted) {
-      setRecords((prev) => prev.some((r) => r.id === inserted.id) ? prev : [...prev, inserted]);
+  const vo = useMemo(() => {
+    if (isBarangayUser && userBarangay) {
+      return organizations.filter((o) => !o.barangay || o.barangay === userBarangay);
     }
+    return organizations;
+  }, [organizations, isBarangayUser, userBarangay]);
+
+  const vSubs = useMemo(() => {
+    const hid = new Set(vh.map((h) => h.id));
+    return householdSubsidies.filter((s) => hid.has(s.household_id));
+  }, [householdSubsidies, vh]);
+
+  const vfIds = useMemo(() => new Set(vf.map((f) => f.id)), [vf]);
+
+  const organizationStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    farmerOrganizations.forEach(({ farmer_id, organization_id }) => {
+      if (vfIds.has(farmer_id)) {
+        counts.set(organization_id, (counts.get(organization_id) || 0) + 1);
+      }
+    });
+    return vo.map((org) => ({
+      id: org.id,
+      name: org.name,
+      org_type: org.org_type,
+      memberCount: counts.get(org.id) || 0,
+    }));
+  }, [farmerOrganizations, vfIds, vo]);
+
+  const uniqueFarmersInOrganizations = useMemo(() => {
+    const ids = new Set<string>();
+    farmerOrganizations.forEach(({ farmer_id }) => {
+      if (vfIds.has(farmer_id)) ids.add(farmer_id);
+    });
+    return ids.size;
+  }, [farmerOrganizations, vfIds]);
+
+  const getHousehold = useCallback(
+    (id: string | null) => (id ? households.find((h) => h.id === id) : undefined),
+    [households],
+  );
+
+  const getOrganizationIdsForFarmer = useCallback(
+    (farmerId: string) => farmerOrganizations.filter((r) => r.farmer_id === farmerId).map((r) => r.organization_id),
+    [farmerOrganizations],
+  );
+
+  const getSubsidiesForHousehold = useCallback(
+    (householdId: string) => vSubs.filter((s) => s.household_id === householdId),
+    [vSubs],
+  );
+
+  /* ── Household Subsidies CRUD ─────────────────────────────────── */
+
+  async function addHouseholdSubsidy(row: {
+    household_id: string;
+    category: SubsidyCategory;
+    product_detail?: string | null;
+    quantity?: number | null;
+    unit?: string | null;
+    amount_php?: number | null;
+    program_source?: string | null;
+    received_date?: string | null;
+    notes?: string | null;
+  }): Promise<AddHouseholdSubsidyResult> {
+    const now = new Date().toISOString();
+    const s: HouseholdSubsidy = {
+      id: crypto.randomUUID(),
+      household_id: row.household_id,
+      category: row.category,
+      product_detail: row.product_detail ?? null,
+      quantity: row.quantity ?? null,
+      unit: row.unit ?? null,
+      amount_php: row.amount_php ?? null,
+      program_source: row.program_source ?? null,
+      received_date: row.received_date || null,
+      notes: row.notes ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+    setHouseholdSubsidies((prev) => {
+      const next = [...prev, s];
+      lsSet(LS_SUBSIDIES, next);
+      return next;
+    });
+    return { ok: true, subsidy: s };
   }
 
-  async function updateRecord(id: string, data: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">) {
-    const ff = computeFarmerFields(data.farmer_ids || [], farmersRef.current);
-    const payload = { ...data, ...ff, farmer_ids: data.farmer_ids || [] };
+  async function updateHouseholdSubsidy(
+    id: string,
+    patch: Partial<{
+      category: SubsidyCategory;
+      product_detail: string | null;
+      quantity: number | null;
+      unit: string | null;
+      amount_php: number | null;
+      program_source: string | null;
+      received_date: string | null;
+      notes: string | null;
+    }>,
+  ): Promise<MutationResult> {
+    const now = new Date().toISOString();
+    setHouseholdSubsidies((prev) => {
+      const next = prev.map((x) => (x.id === id ? { ...x, ...patch, updated_at: now } : x));
+      lsSet(LS_SUBSIDIES, next);
+      return next;
+    });
+    return { ok: true };
+  }
 
-    const { error } = await supabase.from('agri_records').update(payload).eq('id', id);
-    if (!error) {
-      setRecords((prev) => prev.map((r) => r.id === id ? { ...r, ...payload, updated_at: new Date().toISOString() } : r));
-    }
+  async function deleteHouseholdSubsidy(id: string): Promise<MutationResult> {
+    setHouseholdSubsidies((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      lsSet(LS_SUBSIDIES, next);
+      return next;
+    });
+    return { ok: true };
+  }
+
+  /* ── Records CRUD ─────────────────────────────────────────────── */
+
+  async function addRecord(data: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">): Promise<AddRecordResult> {
+    const ff = computeFarmerFields(data.farmer_ids || [], farmersRef.current);
+    const now = new Date().toISOString();
+    const newRecord: AgriRecord = {
+      ...data,
+      ...ff,
+      farmer_ids: data.farmer_ids || [],
+      id: crypto.randomUUID(),
+      created_at: now,
+      updated_at: now,
+    } as AgriRecord;
+    setRecords((prev) => {
+      const next = [...prev, newRecord];
+      lsSet(LS_RECORDS, next);
+      return next;
+    });
+    return { ok: true };
+  }
+
+  async function updateRecord(id: string, data: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">): Promise<MutationResult> {
+    const ff = computeFarmerFields(data.farmer_ids || [], farmersRef.current);
+    const now = new Date().toISOString();
+    const payload = { ...data, ...ff, farmer_ids: data.farmer_ids || [] };
+    setRecords((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, ...payload, updated_at: now } : r));
+      lsSet(LS_RECORDS, next);
+      return next;
+    });
+    return { ok: true };
   }
 
   async function deleteRecord(id: string) {
-    const { error } = await supabase.from('agri_records').delete().eq('id', id);
-    if (!error) {
-      setRecords((prev) => prev.filter((r) => r.id !== id));
-    }
-  }
-
-  // ── Farmer CRUD ──────────────────────────────────────────────────────────
-  async function addFarmer(data: Omit<Farmer, "id" | "created_at" | "updated_at">) {
-    const { data: inserted, error } = await supabase.from('farmers').insert(data).select().single();
-    if (!error && inserted) {
-      setFarmers((prev) => prev.some((f) => f.id === inserted.id) ? prev : [...prev, inserted]);
-    }
-  }
-
-  async function updateFarmer(id: string, data: Omit<Farmer, "id" | "created_at" | "updated_at">) {
-    const { error } = await supabase.from('farmers').update(data).eq('id', id);
-    if (error) return;
-
-    // Update local farmer state
-    setFarmers((prev) => prev.map((f) => (f.id === id ? { ...f, ...data, updated_at: new Date().toISOString() } : f)));
-
-    // Recompute denormalized fields in all linked agri_records
-    const currentFarmers = farmersRef.current;
-    const updatedFarmers = currentFarmers.map((f) => f.id === id ? { ...f, ...data, updated_at: new Date().toISOString() } : f);
-
-    // Find linked records and update them in Supabase
-    const linkedRecords = records.filter((r) => r.farmer_ids?.includes(id));
-    const updatePromises = linkedRecords.map((r) => {
-      const ff = computeFarmerFields(r.farmer_ids, updatedFarmers);
-      return supabase.from('agri_records').update(ff).eq('id', r.id);
+    setRecords((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      lsSet(LS_RECORDS, next);
+      return next;
     });
-    await Promise.all(updatePromises);
+  }
 
-    // Update local records state
-    setRecords((prev) => prev.map((r) => r.farmer_ids?.includes(id) ? { ...r, ...computeFarmerFields(r.farmer_ids, updatedFarmers) } : r));
+  /* ── Households CRUD ──────────────────────────────────────────── */
+
+  function insertHouseholdRow(
+    h: Omit<Household, "id" | "created_at" | "updated_at">,
+  ): { ok: true; row: Household } | { ok: false; message: string } {
+    const now = new Date().toISOString();
+    const row: Household = { ...h, id: crypto.randomUUID(), created_at: now, updated_at: now } as Household;
+    setHouseholds((prev) => {
+      const next = [...prev, row];
+      lsSet(LS_HOUSEHOLDS, next);
+      return next;
+    });
+    return { ok: true, row };
+  }
+
+  async function addHousehold(h: Omit<Household, "id" | "created_at" | "updated_at">) {
+    const r = insertHouseholdRow(h);
+    return r.ok ? r.row : null;
+  }
+
+  async function updateHousehold(id: string, h: Partial<Omit<Household, "id" | "created_at" | "updated_at">>): Promise<MutationResult> {
+    const now = new Date().toISOString();
+    setHouseholds((prev) => {
+      const next = prev.map((x) => (x.id === id ? { ...x, ...h, updated_at: now } : x));
+      lsSet(LS_HOUSEHOLDS, next);
+      return next;
+    });
+    return { ok: true };
+  }
+
+  async function deleteHousehold(id: string) {
+    setHouseholds((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      lsSet(LS_HOUSEHOLDS, next);
+      return next;
+    });
+    setHouseholdSubsidies((prev) => {
+      const next = prev.filter((s) => s.household_id !== id);
+      lsSet(LS_SUBSIDIES, next);
+      return next;
+    });
+    setFarmers((prev) => {
+      const next = prev.map((f) => (f.household_id === id ? { ...f, household_id: null } : f));
+      lsSet(LS_FARMERS, next);
+      return next;
+    });
+  }
+
+  /* ── Organizations CRUD ───────────────────────────────────────── */
+
+  async function addOrganization(o: Omit<Organization, "id" | "created_at" | "updated_at">): Promise<AddOrganizationResult> {
+    const now = new Date().toISOString();
+    const org: Organization = { ...o, id: crypto.randomUUID(), created_at: now, updated_at: now } as Organization;
+    setOrganizations((prev) => {
+      const next = [...prev, org];
+      lsSet(LS_ORGANIZATIONS, next);
+      return next;
+    });
+    return { ok: true, organization: org };
+  }
+
+  async function updateOrganization(id: string, o: Partial<Omit<Organization, "id" | "created_at" | "updated_at">>) {
+    const now = new Date().toISOString();
+    setOrganizations((prev) => {
+      const next = prev.map((x) => (x.id === id ? { ...x, ...o, updated_at: now } : x));
+      lsSet(LS_ORGANIZATIONS, next);
+      return next;
+    });
+  }
+
+  async function deleteOrganization(id: string): Promise<MutationResult> {
+    setOrganizations((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      lsSet(LS_ORGANIZATIONS, next);
+      return next;
+    });
+    setFarmerOrganizations((prev) => {
+      const next = prev.filter((r) => r.organization_id !== id);
+      lsSet(LS_FARMER_ORGS, next);
+      return next;
+    });
+    setHouseholds((prev) => {
+      const next = prev.map((h) => (h.organization_id === id ? { ...h, organization_id: null } : h));
+      lsSet(LS_HOUSEHOLDS, next);
+      return next;
+    });
+    return { ok: true };
+  }
+
+  /* ── Farmer-Organizations ─────────────────────────────────────── */
+
+  async function saveFarmerOrganizations(farmerId: string, organizationIds: string[]): Promise<MutationResult> {
+    setFarmerOrganizations((prev) => {
+      const rest = prev.filter((r) => r.farmer_id !== farmerId);
+      const next = [...rest, ...organizationIds.map((organization_id) => ({ farmer_id: farmerId, organization_id }))];
+      lsSet(LS_FARMER_ORGS, next);
+      return next;
+    });
+    return { ok: true };
+  }
+
+  /* ── Farmer helpers ───────────────────────────────────────────── */
+
+  function demoteOtherHouseholdHeads(householdId: string, exceptFarmerId: string) {
+    setFarmers((prev) => {
+      const next = prev.map((f) =>
+        f.household_id === householdId && f.id !== exceptFarmerId ? { ...f, is_household_head: false } : f,
+      );
+      lsSet(LS_FARMERS, next);
+      return next;
+    });
+  }
+
+  /* ── Farmers CRUD ─────────────────────────────────────────────── */
+
+  async function addFarmer(raw: AddFarmerInput): Promise<AddFarmerResult> {
+    const { new_household_display_name, ...data } = raw;
+    let payload = { ...data };
+    if (!payload.household_id) {
+      const displayName =
+        (typeof new_household_display_name === "string" && new_household_display_name.trim()) ||
+        `Household — ${data.name}`;
+      const hh = insertHouseholdRow({
+        barangay: data.barangay,
+        display_name: displayName,
+        farming_area_hectares: 0,
+        rffa_subsidies_notes: "",
+        organization_id: null,
+      });
+      if (!hh.ok) {
+        return { ok: false, message: hh.message };
+      }
+      payload = { ...payload, household_id: hh.row.id, is_household_head: true };
+    }
+
+    const now = new Date().toISOString();
+    const row: Farmer = normalizeFarmer({
+      id: crypto.randomUUID(),
+      name: payload.name,
+      gender: payload.gender,
+      barangay: payload.barangay,
+      household_id: payload.household_id,
+      is_household_head: payload.is_household_head,
+      rsbsa_number: payload.rsbsa_number,
+      birth_date: payload.birth_date,
+      civil_status: payload.civil_status,
+      photo_url: payload.photo_url,
+      created_at: now,
+      updated_at: now,
+    });
+    setFarmers((prev) => {
+      const next = [...prev, row];
+      lsSet(LS_FARMERS, next);
+      return next;
+    });
+    if (row.household_id && row.is_household_head) {
+      demoteOtherHouseholdHeads(row.household_id, row.id);
+    }
+    return { ok: true, id: row.id };
+  }
+
+  async function updateFarmer(id: string, data: Omit<Farmer, "id" | "created_at" | "updated_at">): Promise<MutationResult> {
+    const iso = new Date().toISOString();
+    const updatedFarmers = farmersRef.current.map((f) =>
+      f.id === id ? { ...f, ...data, updated_at: iso } : f,
+    );
+    setFarmers(() => {
+      lsSet(LS_FARMERS, updatedFarmers);
+      return updatedFarmers;
+    });
+
+    if (data.household_id && data.is_household_head) {
+      demoteOtherHouseholdHeads(data.household_id, id);
+    }
+
+    // Update linked records with new farmer fields
+    setRecords((prev) => {
+      const next = prev.map((r) =>
+        r.farmer_ids?.includes(id) ? { ...r, ...computeFarmerFields(r.farmer_ids, updatedFarmers) } : r,
+      );
+      lsSet(LS_RECORDS, next);
+      return next;
+    });
+    return { ok: true };
   }
 
   async function deleteFarmer(id: string) {
-    const { error } = await supabase.from('farmers').delete().eq('id', id);
-    if (error) return;
-
-    setFarmers((prev) => prev.filter((f) => f.id !== id));
-
-    // Remove farmer ID from linked records and recompute denormalized fields
     const remaining = farmersRef.current.filter((f) => f.id !== id);
-    const linkedRecords = records.filter((r) => r.farmer_ids?.includes(id));
 
-    const updatePromises = linkedRecords.map((r) => {
-      const newIds = r.farmer_ids.filter((fid) => fid !== id);
-      const ff = computeFarmerFields(newIds, remaining);
-      return supabase.from('agri_records').update({ farmer_ids: newIds, ...ff }).eq('id', r.id);
+    setFarmers(() => {
+      lsSet(LS_FARMERS, remaining);
+      return remaining;
     });
-    await Promise.all(updatePromises);
+    setFarmerOrganizations((prev) => {
+      const next = prev.filter((r) => r.farmer_id !== id);
+      lsSet(LS_FARMER_ORGS, next);
+      return next;
+    });
 
-    setRecords((prev) => prev.map((r) => {
-      if (r.farmer_ids?.includes(id)) {
-        const newIds = r.farmer_ids.filter((fid) => fid !== id);
-        return { ...r, farmer_ids: newIds, ...computeFarmerFields(newIds, remaining) };
-      }
-      return r;
-    }));
+    setRecords((prev) => {
+      const next = prev.map((r) => {
+        if (r.farmer_ids?.includes(id)) {
+          const newIds = r.farmer_ids.filter((fid) => fid !== id);
+          return { ...r, farmer_ids: newIds, ...computeFarmerFields(newIds, remaining) };
+        }
+        return r;
+      });
+      lsSet(LS_RECORDS, next);
+      return next;
+    });
   }
 
   const getFarmersByIds = useCallback((ids: string[]) => farmers.filter((f) => ids.includes(f.id)), [farmers]);
 
-  // ── Derived stats (all use vr/vf = visible records/farmers) ────────────
+  /* ── Computed / memoised values (unchanged) ───────────────────── */
+
   const farmersByBarangay = useMemo(() => {
     const map: Record<string, Farmer[]> = {};
     BARANGAYS.forEach((b) => { map[b] = []; });
@@ -249,7 +645,10 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }, [vr]);
 
   const totalPlantingArea = useMemo(() => +vr.reduce((s, r) => s + r.planting_area_hectares, 0).toFixed(2), [vr]);
-  const totalDamagedArea = useMemo(() => +vr.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2), [vr]);
+  const totalDamagedArea = useMemo(
+    () => +vr.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2),
+    [vr],
+  );
 
   const mostProducedCommodity = useMemo(() => {
     const t: Record<string, number> = {};
@@ -266,26 +665,48 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const productionBySubCategory = useMemo(() => {
     const t: Record<string, { commodity: string; bags: number }> = {};
-    vr.forEach((r) => { if (!t[r.sub_category]) t[r.sub_category] = { commodity: r.commodity, bags: 0 }; t[r.sub_category].bags += r.harvesting_output_bags; });
+    vr.forEach((r) => {
+      if (!t[r.sub_category]) t[r.sub_category] = { commodity: r.commodity, bags: 0 };
+      t[r.sub_category].bags += r.harvesting_output_bags;
+    });
     return Object.entries(t).map(([name, v]) => ({ name, ...v, tons: +(v.bags * 0.04).toFixed(2) }));
   }, [vr]);
 
   const farmersByCommodity = useMemo(() => {
     const t: Record<string, { male: number; female: number; total: number }> = {};
-    vr.forEach((r) => { if (!t[r.commodity]) t[r.commodity] = { male: 0, female: 0, total: 0 }; t[r.commodity].male += r.farmer_male; t[r.commodity].female += r.farmer_female; t[r.commodity].total += r.total_farmers; });
+    vr.forEach((r) => {
+      if (!t[r.commodity]) t[r.commodity] = { male: 0, female: 0, total: 0 };
+      t[r.commodity].male += r.farmer_male;
+      t[r.commodity].female += r.farmer_female;
+      t[r.commodity].total += r.total_farmers;
+    });
     return Object.entries(t).map(([name, v]) => ({ name, ...v }));
   }, [vr]);
 
   const damageRiskData = useMemo(
-    () => vr.filter((r) => r.damage_pests_hectares > 0 || r.damage_calamity_hectares > 0 || r.pests_diseases !== "None" || r.calamity !== "None")
-      .sort((a, b) => (b.damage_pests_hectares + b.damage_calamity_hectares) - (a.damage_pests_hectares + a.damage_calamity_hectares)),
-    [vr]
+    () =>
+      vr
+        .filter(
+          (r) =>
+            r.damage_pests_hectares > 0 ||
+            r.damage_calamity_hectares > 0 ||
+            r.pests_diseases !== "None" ||
+            r.calamity !== "None" ||
+            r.calamity_sub_category !== "None",
+        )
+        .sort(
+          (a, b) =>
+            b.damage_pests_hectares + b.damage_calamity_hectares - (a.damage_pests_hectares + a.damage_calamity_hectares),
+        ),
+    [vr],
   );
 
   const damageByCommodity = useMemo(() => {
     const t: Record<string, number> = {};
     vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + r.damage_pests_hectares + r.damage_calamity_hectares; });
-    return Object.entries(t).map(([name, area]) => ({ name, area: +area.toFixed(2) })).sort((a, b) => b.area - a.area);
+    return Object.entries(t)
+      .map(([name, area]) => ({ name, area: +area.toFixed(2) }))
+      .sort((a, b) => b.area - a.area);
   }, [vr]);
 
   const damageByBarangay = useMemo(() => {
@@ -297,18 +718,18 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   const mostAffectedBarangay = useMemo(() => {
     const entries = Object.entries(damageByBarangay);
     if (entries.length === 0) return "None";
-    const max = entries.reduce((a, b) => b[1] > a[1] ? b : a);
+    const max = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
     return max[1] > 0 ? max[0] : "None";
   }, [damageByBarangay]);
 
   const damagePercentage = useMemo(
-    () => totalPlantingArea > 0 ? +(totalDamagedArea / totalPlantingArea * 100).toFixed(1) : 0,
-    [totalDamagedArea, totalPlantingArea]
+    () => (totalPlantingArea > 0 ? +((totalDamagedArea / totalPlantingArea) * 100).toFixed(1) : 0),
+    [totalDamagedArea, totalPlantingArea],
   );
 
   const affectedFarmerCount = useMemo(
     () => vr.filter((r) => r.damage_pests_hectares > 0 || r.damage_calamity_hectares > 0).reduce((s, r) => s + r.total_farmers, 0),
-    [vr]
+    [vr],
   );
 
   const damageTrend = useMemo<"increasing" | "decreasing" | "stable">(() => {
@@ -324,7 +745,11 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const recordsByDate = useMemo(() => {
     const map: Record<string, AgriRecord[]> = {};
-    vr.forEach((r) => { const day = new Date(r.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); if (!map[day]) map[day] = []; map[day].push(r); });
+    vr.forEach((r) => {
+      const day = new Date(r.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+      if (!map[day]) map[day] = [];
+      map[day].push(r);
+    });
     return map;
   }, [vr]);
 
@@ -335,18 +760,62 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     return BARANGAYS.map((name) => {
       const br = records.filter((r) => r.barangay === name);
       if (br.length === 0) return { name, daysSinceUpdate: null, lastUpdate: null };
-      const latest = br.reduce((max, r) => r.created_at > max ? r.created_at : max, "");
-      return { name, daysSinceUpdate: Math.floor((staleTimestamp - new Date(latest).getTime()) / 86400000), lastUpdate: latest.slice(0, 10) };
+      const latest = br.reduce((max, r) => (r.created_at > max ? r.created_at : max), "");
+      return {
+        name,
+        daysSinceUpdate: Math.floor((staleTimestamp - new Date(latest).getTime()) / 86400000),
+        lastUpdate: latest.slice(0, 10),
+      };
     });
   }, [records, staleTimestamp]);
 
   const value: AgriContextValue = {
-    records: vr, addRecord, updateRecord, deleteRecord,
-    farmers: vf, addFarmer, updateFarmer, deleteFarmer, getFarmersByIds, farmersByBarangay,
-    totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity,
-    productionByCommodity, productionBySubCategory, farmersByCommodity,
-    damageRiskData, damageByCommodity, damageByBarangay, mostAffectedBarangay,
-    damagePercentage, affectedFarmerCount, damageTrend, recordsByDate, staleBarangays,
+    records: vr,
+    addRecord,
+    updateRecord,
+    deleteRecord,
+    farmers: vf,
+    addFarmer,
+    updateFarmer,
+    deleteFarmer,
+    getFarmersByIds,
+    farmersByBarangay,
+    households: vh,
+    organizations: vo,
+    farmerOrganizations,
+    getHousehold,
+    addHousehold,
+    updateHousehold,
+    deleteHousehold,
+    addOrganization,
+    updateOrganization,
+    deleteOrganization,
+    saveFarmerOrganizations,
+    householdSubsidies: vSubs,
+    getSubsidiesForHousehold,
+    addHouseholdSubsidy,
+    updateHouseholdSubsidy,
+    deleteHouseholdSubsidy,
+    getOrganizationIdsForFarmer,
+    organizationStats,
+    uniqueFarmersInOrganizations,
+    totalFarmers,
+    totalProduction,
+    totalPlantingArea,
+    totalDamagedArea,
+    mostProducedCommodity,
+    productionByCommodity,
+    productionBySubCategory,
+    farmersByCommodity,
+    damageRiskData,
+    damageByCommodity,
+    damageByBarangay,
+    mostAffectedBarangay,
+    damagePercentage,
+    affectedFarmerCount,
+    damageTrend,
+    recordsByDate,
+    staleBarangays,
   };
 
   return <AgriContext.Provider value={value}>{children}</AgriContext.Provider>;

@@ -56,6 +56,108 @@ body {
 .delay-4 { animation-delay: 0.24s; }
 .delay-5 { animation-delay: 0.30s; }
 
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    #e2e8f0 0%,
+    #f1f5f9 45%,
+    #e8eef5 55%,
+    #e2e8f0 100%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.25s ease-in-out infinite;
+}
+
+@keyframes dashboardEnter {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+.dashboard-shell-enter {
+  animation: dashboardEnter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes tabPaneEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tab-pane-enter {
+  animation: tabPaneEnter 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/*
+ * Dialog / modal / dropdown transitions.
+ * Overlays fade background-color (NOT opacity) so backdrop-filter blur stays visible.
+ * Panels transition opacity + scale.
+ */
+
+.dialog-overlay {
+  background-color: transparent;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background-color 200ms ease;
+}
+.dialog-overlay-visible {
+  background-color: rgba(0, 0, 0, 0.25);
+}
+
+.dialog-panel {
+  opacity: 0;
+  transform: scale(0.97) translateY(6px);
+  transition: opacity 250ms cubic-bezier(0.22, 1, 0.36, 1),
+              transform 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dialog-panel-visible {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.dropdown-animate {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.dropdown-animate-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.backdrop-animate {
+  background-color: transparent;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background-color 200ms ease;
+}
+.backdrop-animate-visible {
+  background-color: rgba(0, 0, 0, 0.20);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-shell-enter,
+  .tab-pane-enter,
+  .fade-up,
+  .skeleton-shimmer {
+    animation: none !important;
+  }
+
+  .skeleton-shimmer {
+    background: #e2e8f0;
+  }
+
+  .dialog-overlay,
+  .dialog-panel,
+  .dropdown-animate,
+  .backdrop-animate {
+    transition: none !important;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Premium glassmorphic dashboard primitives                                    */
 /* -------------------------------------------------------------------------- */

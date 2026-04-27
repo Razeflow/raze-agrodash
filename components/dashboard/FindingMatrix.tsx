@@ -116,6 +116,7 @@ export default function FindingMatrix({ barangayFilter }: { barangayFilter?: str
       collapsible
       defaultExpanded
       noPadding
+      variant="compact"
     >
       {/* Matrix Table */}
       <div className="overflow-x-auto">

@@ -2,17 +2,40 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
-import { BARANGAYS, formatDatePH, formatPeriod } from "@/lib/data";
-import type { Farmer } from "@/lib/data";
+import { BARANGAYS, formatPeriod, ORG_TYPE_LABELS, formatHouseholdSubsidySummary } from "@/lib/data";
+import type { Farmer, Household } from "@/lib/data";
 import {
   Search, UserPlus, Pencil, Trash2, MapPin, Users, X,
-  User, Calendar, ChevronRight, ArrowLeft,
+  User, Calendar, ChevronRight, ArrowLeft, Home, Building2, UserMinus, HandCoins,
 } from "lucide-react";
 import FarmerFormDialog from "./FarmerFormDialog";
+import HouseholdEditDialog from "./HouseholdEditDialog";
+import HouseholdBrowseDialog from "./HouseholdBrowseDialog";
 import BentoCard from "@/components/ui/BentoCard";
+import DialogPortal from "@/components/ui/DialogPortal";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+
+function farmerAge(birthDate: string | null): string {
+  if (!birthDate) return "—";
+  const d = new Date(birthDate);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diff = Date.now() - d.getTime();
+  return String(Math.floor(diff / 31557600000));
+}
 
 export default function FarmerRegistry() {
-  const { farmersByBarangay, deleteFarmer, records } = useAgriData();
+  const {
+    farmersByBarangay,
+    farmers,
+    households,
+    deleteFarmer,
+    records,
+    getHousehold,
+    organizations,
+    updateFarmer,
+    getOrganizationIdsForFarmer,
+    getSubsidiesForHousehold,
+  } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
 
   // ── Global filters ──
@@ -32,6 +55,14 @@ export default function FarmerRegistry() {
   // ── Delete confirmation ──
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Farmer | null>(null);
+
+  const [householdEdit, setHouseholdEdit] = useState<Household | null>(null);
+  const [householdBrowseOpen, setHouseholdBrowseOpen] = useState(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+
+  // ── Animated mount for inline modals ──
+  const brgyModal = useAnimatedMount(!!activeBarangay);
+  const delModal = useAnimatedMount(deleteOpen);
 
   // ── Escape key closes modal ──
   useEffect(() => {
@@ -60,7 +91,10 @@ export default function FarmerRegistry() {
       const all = farmersByBarangay[brgy] || [];
       result[brgy] = all.filter((f) => {
         const matchGender = genderFilter === "All" || f.gender === genderFilter;
-        const matchSearch = !q || f.name.toLowerCase().includes(q);
+        const matchSearch =
+          !q ||
+          f.name.toLowerCase().includes(q) ||
+          (f.rsbsa_number && f.rsbsa_number.toLowerCase().includes(q));
         return matchGender && matchSearch;
       });
     }
@@ -92,11 +126,56 @@ export default function FarmerRegistry() {
     setFormMode("edit"); setEditFarmer(f); setFormDefaultBarangay(undefined); setFormOpen(true);
   }
   function openDelete(f: Farmer) { setDeleteTarget(f); setDeleteOpen(true); }
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTarget) return;
-    deleteFarmer(deleteTarget.id);
+    await deleteFarmer(deleteTarget.id);
     if (selectedFarmer?.id === deleteTarget.id) setSelectedFarmer(null);
     setDeleteOpen(false); setDeleteTarget(null);
+  }
+
+  const listGrouped = useMemo(() => {
+    const byH = new Map<string, Farmer[]>();
+    const noH: Farmer[] = [];
+    modalFarmers.forEach((f) => {
+      if (!f.household_id) noH.push(f);
+      else {
+        const arr = byH.get(f.household_id) || [];
+        arr.push(f);
+        byH.set(f.household_id, arr);
+      }
+    });
+    const householdIds = [...byH.keys()].sort((a, b) => {
+      const na = getHousehold(a)?.display_name || a;
+      const nb = getHousehold(b)?.display_name || b;
+      return na.localeCompare(nb);
+    });
+    return { byH, householdIds, noH };
+  }, [modalFarmers, getHousehold]);
+
+  async function moveOutOfHousehold(f: Farmer) {
+    setRegistryError(null);
+    const res = await updateFarmer(f.id, {
+      name: f.name,
+      gender: f.gender,
+      barangay: f.barangay,
+      household_id: null,
+      is_household_head: false,
+      rsbsa_number: f.rsbsa_number,
+      birth_date: f.birth_date,
+      civil_status: f.civil_status,
+      photo_url: f.photo_url,
+    });
+    if (!res.ok) {
+      setRegistryError(res.message);
+      return;
+    }
+    if (selectedFarmer?.id === f.id) {
+      setSelectedFarmer({
+        ...f,
+        household_id: null,
+        is_household_head: false,
+      });
+    }
   }
 
   const gridClass = isBarangayUser
@@ -114,6 +193,9 @@ export default function FarmerRegistry() {
               <p className="text-xs text-slate-400 mt-0.5">
                 {totalFiltered} farmer{totalFiltered !== 1 ? "s" : ""} across {barangayList.length} barangay{barangayList.length !== 1 ? "s" : ""}
               </p>
+              {registryError && (
+                <p className="mt-2 text-xs font-medium text-red-600 rounded-xl bg-red-50/80 border border-red-100 px-3 py-2">{registryError}</p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
@@ -135,6 +217,17 @@ export default function FarmerRegistry() {
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegistryError(null);
+                  setHouseholdBrowseOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-[1.5rem] border border-emerald-200/60 bg-emerald-50/80 p-2 px-4 text-xs font-semibold text-emerald-800 hover:bg-emerald-100/90 transition"
+                title="Browse households, RFFA notes, and assistance lines"
+              >
+                <HandCoins size={14} /> Households &amp; assistance
+              </button>
               <button
                 onClick={openGlobalAdd}
                 className="flex items-center gap-1.5 rounded-[1.5rem] bg-emerald-600 p-2 px-4 text-xs font-semibold text-white hover:bg-emerald-700 transition"
@@ -195,10 +288,12 @@ export default function FarmerRegistry() {
       </div>
 
       {/* ── Barangay Modal ── */}
-      {activeBarangay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={closeModal} />
-          <div className="relative z-10 w-full max-w-lg max-h-[85vh] flex flex-col rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 shadow-2xl overflow-hidden">
+      {brgyModal.mounted && activeBarangay && (
+        <DialogPortal>
+        <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
+          <div className={`fixed inset-0 dialog-overlay ${brgyModal.visible ? "dialog-overlay-visible" : ""}`} onClick={closeModal} />
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className={`relative z-10 w-full max-w-xl max-h-[85vh] flex flex-col rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 shadow-2xl overflow-hidden dialog-panel ${brgyModal.visible ? "dialog-panel-visible" : ""}`}>
 
             {/* Modal header */}
             <div className="shrink-0 border-b border-white/30 px-5 py-4">
@@ -246,38 +341,157 @@ export default function FarmerRegistry() {
               {selectedFarmer ? (
                 /* ── Farmer Detail View ── */
                 <div className="p-6 space-y-5">
-                  {/* Large avatar */}
-                  <div className="flex flex-col items-center gap-2">
-                    <div className={`flex h-16 w-16 items-center justify-center rounded-2xl text-xl font-bold ${
-                      selectedFarmer.gender === "Male" ? "bg-blue-100 text-blue-600" : "bg-pink-100 text-pink-500"
-                    }`}>
-                      {selectedFarmer.name.charAt(0).toUpperCase()}
-                    </div>
-                    <h4 className="text-lg font-bold text-slate-800">{selectedFarmer.name}</h4>
-                    <span className={`inline-flex items-center rounded-[1rem] px-2.5 py-0.5 text-[11px] font-semibold ${
-                      selectedFarmer.gender === "Male" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-500"
-                    }`}>
-                      {selectedFarmer.gender}
-                    </span>
-                  </div>
-
-                  {/* 2x2 info grid */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { icon: User, label: "Full Name", value: selectedFarmer.name },
-                      { icon: Users, label: "Gender", value: selectedFarmer.gender },
-                      { icon: MapPin, label: "Barangay", value: selectedFarmer.barangay },
-                      { icon: Calendar, label: "Registered", value: new Date(selectedFarmer.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) },
-                    ].map(({ icon: Icon, label, value }) => (
-                      <div key={label} className="rounded-2xl bg-white/50 backdrop-blur border border-white/30 p-3">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Icon size={12} className="text-slate-400" />
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                  {(() => {
+                    const hh = selectedFarmer.household_id ? getHousehold(selectedFarmer.household_id) : undefined;
+                    const orgIds = getOrganizationIdsForFarmer(selectedFarmer.id);
+                    const orgNames = orgIds
+                      .map((id) => organizations.find((o) => o.id === id))
+                      .filter(Boolean)
+                      .map((o) => `${o!.name} (${ORG_TYPE_LABELS[o!.org_type]})`)
+                      .join(", ");
+                    return (
+                      <>
+                        <div className="flex flex-col items-center gap-2">
+                          {selectedFarmer.photo_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={selectedFarmer.photo_url}
+                              alt=""
+                              className="h-20 w-20 rounded-2xl object-cover border border-white/40 shadow-md"
+                            />
+                          ) : (
+                            <div
+                              className={`flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-bold ${
+                                selectedFarmer.gender === "Male" ? "bg-blue-100 text-blue-600" : "bg-pink-100 text-pink-500"
+                              }`}
+                            >
+                              {selectedFarmer.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <h4 className="text-lg font-bold text-slate-800">{selectedFarmer.name}</h4>
+                          <span
+                            className={`inline-flex items-center rounded-[1rem] px-2.5 py-0.5 text-[11px] font-semibold ${
+                              selectedFarmer.gender === "Male" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-500"
+                            }`}
+                          >
+                            {selectedFarmer.gender}
+                          </span>
                         </div>
-                        <p className="text-sm font-medium text-slate-800">{value}</p>
-                      </div>
-                    ))}
-                  </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { icon: User, label: "RSBSA", value: selectedFarmer.rsbsa_number || "—" },
+                            { icon: Calendar, label: "Age (yrs)", value: farmerAge(selectedFarmer.birth_date) },
+                            { icon: User, label: "Civil status", value: selectedFarmer.civil_status || "—" },
+                            { icon: MapPin, label: "Barangay", value: selectedFarmer.barangay },
+                          ].map(({ icon: Icon, label, value }) => (
+                            <div key={label} className="rounded-2xl bg-white/50 backdrop-blur border border-white/30 p-3">
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <Icon size={12} className="text-slate-400" />
+                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                              </div>
+                              <p className="text-sm font-medium text-slate-800">{value}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="rounded-2xl bg-emerald-50/40 border border-emerald-100/50 p-4 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 flex items-center gap-1">
+                              <Home size={12} /> Household
+                            </p>
+                            {hh && (
+                              <button
+                                type="button"
+                                onClick={() => setHouseholdEdit(hh)}
+                                className="text-[10px] font-bold text-emerald-700 hover:underline"
+                              >
+                                Edit household and subsidies
+                              </button>
+                            )}
+                          </div>
+                          {hh ? (
+                            <>
+                              <p className="text-sm font-semibold text-slate-800">{hh.display_name}</p>
+                              <p className="text-xs text-slate-600">
+                                Shared area: {hh.farming_area_hectares ?? 0} ha
+                              </p>
+                              {hh.rffa_subsidies_notes ? (
+                                <p className="text-xs text-slate-500 whitespace-pre-wrap">{hh.rffa_subsidies_notes}</p>
+                              ) : (
+                                <p className="text-xs text-slate-400 italic">No RFFA / subsidy notes yet.</p>
+                              )}
+                              {(() => {
+                                const sm = formatHouseholdSubsidySummary(getSubsidiesForHousehold(hh.id));
+                                return sm ? (
+                                  <p className="text-xs text-emerald-900/90 font-medium mt-2 line-clamp-3">Assistance items: {sm}</p>
+                                ) : null;
+                              })()}
+                            </>
+                          ) : (
+                            <p className="text-xs text-amber-700">Not in a household — assign when editing the farmer.</p>
+                          )}
+                          {hh && (
+                            <button
+                              type="button"
+                              onClick={() => moveOutOfHousehold(selectedFarmer)}
+                              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-[1.5rem] border border-slate-200 bg-white/70 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                            >
+                              <UserMinus size={14} /> Move out of household
+                            </button>
+                          )}
+                          {hh &&
+                            (() => {
+                              const members = farmers
+                                .filter((f) => f.household_id === hh.id)
+                                .sort(
+                                  (a, b) =>
+                                    Number(b.is_household_head) - Number(a.is_household_head) ||
+                                    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+                                );
+                              if (members.length === 0) return null;
+                              return (
+                                <div className="mt-3 pt-3 border-t border-emerald-100/80">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-800 mb-2">
+                                    Household members ({members.length})
+                                  </p>
+                                  <ul className="space-y-1.5">
+                                    {members.map((m) => (
+                                      <li
+                                        key={m.id}
+                                        className="flex items-center justify-between gap-2 rounded-xl bg-white/50 px-2.5 py-1.5 text-xs text-slate-800"
+                                      >
+                                        <span className="truncate font-medium">
+                                          {m.name}
+                                          {m.id === selectedFarmer.id ? (
+                                            <span className="text-slate-400 font-normal"> · viewing</span>
+                                          ) : null}
+                                        </span>
+                                        {m.is_household_head ? (
+                                          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                                            Head
+                                          </span>
+                                        ) : (
+                                          <span className="shrink-0 text-[10px] text-slate-400">Member</span>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              );
+                            })()}
+                        </div>
+
+                        <div className="rounded-2xl bg-white/50 backdrop-blur border border-white/30 p-3">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Building2 size={12} className="text-slate-400" />
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Organizations</p>
+                          </div>
+                          <p className="text-sm text-slate-700">{orgNames || "—"}</p>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* Linked commodity records */}
                   {(() => {
@@ -338,47 +552,112 @@ export default function FarmerRegistry() {
                       )}
                     </div>
                   ) : (
-                    modalFarmers.map((f) => (
-                      <div
-                        key={f.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelectedFarmer(f)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedFarmer(f); }}
-                        className="flex items-center gap-3 rounded-2xl bg-white/50 backdrop-blur border border-white/30 hover:border-emerald-200 hover:bg-emerald-50/30 p-3 cursor-pointer transition-all group"
-                      >
-                        {/* Avatar */}
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
-                          f.gender === "Male" ? "bg-blue-100 text-blue-600" : "bg-pink-100 text-pink-500"
-                        }`}>
-                          {f.name.charAt(0).toUpperCase()}
-                        </div>
-
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{f.name}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`inline-flex items-center rounded-[1rem] px-1.5 py-0 text-[10px] font-semibold ${
-                              f.gender === "Male" ? "bg-blue-50 text-blue-500" : "bg-pink-50 text-pink-400"
-                            }`}>
-                              {f.gender}
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              {formatDatePH(f.created_at, { month: "short", day: "numeric", year: "numeric" })}
-                            </span>
+                    <div className="space-y-4">
+                      {listGrouped.householdIds.map((hid) => {
+                        const members = listGrouped.byH.get(hid) || [];
+                        const hh = getHousehold(hid);
+                        return (
+                          <div key={hid}>
+                            <div className="flex items-center justify-between px-1 pb-1.5">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
+                                <Home size={11} />
+                                {hh?.display_name || "Household"}
+                                <span className="font-mono text-slate-300">({members.length})</span>
+                              </p>
+                              {hh && (
+                                <button
+                                  type="button"
+                                  onClick={() => setHouseholdEdit(hh)}
+                                  className="text-[10px] font-bold text-emerald-600 hover:underline"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              {members.map((f) => (
+                                <div
+                                  key={f.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setSelectedFarmer(f)}
+                                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedFarmer(f); }}
+                                  className="flex items-center gap-3 rounded-2xl bg-white/50 backdrop-blur border border-white/30 hover:border-emerald-200 hover:bg-emerald-50/30 p-3 cursor-pointer transition-all group"
+                                >
+                                  {f.photo_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={f.photo_url} alt="" className="h-10 w-10 shrink-0 rounded-2xl object-cover" />
+                                  ) : (
+                                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
+                                      f.gender === "Male" ? "bg-blue-100 text-blue-600" : "bg-pink-100 text-pink-500"
+                                    }`}>
+                                      {f.name.charAt(0).toUpperCase()}
+                                    </div>
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-slate-800 truncate">{f.name}</p>
+                                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                                      <span className={`inline-flex items-center rounded-[1rem] px-1.5 py-0 text-[10px] font-semibold ${
+                                        f.gender === "Male" ? "bg-blue-50 text-blue-500" : "bg-pink-50 text-pink-400"
+                                      }`}>
+                                        {f.gender}
+                                      </span>
+                                      {f.rsbsa_number && (
+                                        <span className="text-[10px] text-slate-500">RSBSA {f.rsbsa_number}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <ChevronRight size={16} className="shrink-0 text-slate-300 group-hover:text-emerald-500 transition" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {listGrouped.noH.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 px-1 pb-1.5">
+                            No household ({listGrouped.noH.length})
+                          </p>
+                          <div className="space-y-2">
+                            {listGrouped.noH.map((f) => (
+                              <div
+                                key={f.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedFarmer(f)}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSelectedFarmer(f); }}
+                                className="flex items-center gap-3 rounded-2xl bg-amber-50/30 backdrop-blur border border-amber-100/50 hover:border-emerald-200 hover:bg-emerald-50/30 p-3 cursor-pointer transition-all group"
+                              >
+                                {f.photo_url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={f.photo_url} alt="" className="h-10 w-10 shrink-0 rounded-2xl object-cover" />
+                                ) : (
+                                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold ${
+                                    f.gender === "Male" ? "bg-blue-100 text-blue-600" : "bg-pink-100 text-pink-500"
+                                  }`}>
+                                    {f.name.charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-slate-800 truncate">{f.name}</p>
+                                  <p className="text-[10px] text-amber-700 mt-0.5">Assign household via Edit</p>
+                                </div>
+                                <ChevronRight size={16} className="shrink-0 text-slate-300 group-hover:text-emerald-500 transition" />
+                              </div>
+                            ))}
                           </div>
                         </div>
-
-                        {/* Chevron */}
-                        <ChevronRight size={16} className="shrink-0 text-slate-300 group-hover:text-emerald-500 transition" />
-                      </div>
-                    ))
+                      )}
+                    </div>
                   )}
                 </div>
               )}
             </div>
           </div>
+          </div>
         </div>
+        </DialogPortal>
       )}
 
       {/* ── FarmerFormDialog ── */}
@@ -390,11 +669,27 @@ export default function FarmerRegistry() {
         defaultBarangay={formDefaultBarangay}
       />
 
+      <HouseholdBrowseDialog
+        open={householdBrowseOpen}
+        onClose={() => setHouseholdBrowseOpen(false)}
+        households={households}
+        farmers={farmers}
+        getSubsidiesForHousehold={getSubsidiesForHousehold}
+        onEditHousehold={(h) => {
+          setHouseholdBrowseOpen(false);
+          setHouseholdEdit(h);
+        }}
+      />
+
+      <HouseholdEditDialog open={!!householdEdit} onClose={() => setHouseholdEdit(null)} household={householdEdit} />
+
       {/* ── Delete confirmation ── */}
-      {deleteOpen && deleteTarget && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={() => setDeleteOpen(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-6 shadow-2xl">
+      {delModal.mounted && deleteTarget && (
+        <DialogPortal>
+        <div className="fixed inset-0 lg:left-24 z-[60] overflow-y-auto">
+          <div className={`fixed inset-0 dialog-overlay ${delModal.visible ? "dialog-overlay-visible" : ""}`} onClick={() => setDeleteOpen(false)} />
+          <div className="flex min-h-full items-center justify-center p-4">
+          <div className={`relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-6 shadow-2xl dialog-panel ${delModal.visible ? "dialog-panel-visible" : ""}`}>
             <h2 className="mb-3 text-lg font-bold text-slate-800">Delete Farmer</h2>
             <p className="mb-2 text-sm text-slate-600">
               Are you sure? This farmer will be unlinked from all commodity records.
@@ -408,7 +703,9 @@ export default function FarmerRegistry() {
               <button onClick={confirmDelete} className="rounded-[1.5rem] bg-red-500 p-2 px-5 text-sm font-semibold text-white hover:bg-red-600 transition">Delete</button>
             </div>
           </div>
+          </div>
         </div>
+        </DialogPortal>
       )}
     </>
   );

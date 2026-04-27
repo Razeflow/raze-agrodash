@@ -72,7 +72,7 @@ export default function CommodityAnalytics({ barangayFilter }: { barangayFilter?
 
   if (data.length === 0) {
     return (
-      <BentoCard className="fade-up delay-1">
+      <BentoCard variant="compact" className="fade-up delay-1">
         <p className="py-10 text-center text-sm font-bold text-slate-400">No production data yet. Add commodity records to see analytics.</p>
       </BentoCard>
     );
@@ -80,7 +80,13 @@ export default function CommodityAnalytics({ barangayFilter }: { barangayFilter?
 
   return (
     <div className="grid gap-8 lg:grid-cols-3">
-      <BentoCard title="Production by Commodity" subtitle="Output in bags (40 kg each)" icon={BarChart3} className="fade-up delay-1 lg:col-span-2">
+      <BentoCard
+        variant="compact"
+        title="Production by Commodity"
+        subtitle="Output in bags (40 kg each)"
+        icon={BarChart3}
+        className="fade-up delay-1 lg:col-span-2"
+      >
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={data} barSize={36} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -96,7 +102,13 @@ export default function CommodityAnalytics({ barangayFilter }: { barangayFilter?
         </ResponsiveContainer>
       </BentoCard>
 
-      <BentoCard title="Share of Production" subtitle="% of total output" icon={PieChartIcon} className="fade-up delay-2">
+      <BentoCard
+        variant="compact"
+        title="Share of Production"
+        subtitle="% of total output"
+        icon={PieChartIcon}
+        className="fade-up delay-2"
+      >
         <ResponsiveContainer width="100%" height={260}>
           <PieChart>
             <Pie data={data} dataKey="bags" nameKey="name" cx="50%" cy="48%" outerRadius={88} labelLine={false} label={renderCustomLabel}>

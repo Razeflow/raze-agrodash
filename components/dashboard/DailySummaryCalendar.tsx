@@ -118,7 +118,13 @@ export default function DailySummaryCalendar({ barangayFilter }: { barangayFilte
     <>
       <div className="fade-up delay-1 grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8">
         {/* ── LEFT: Calendar Panel ──────────────────────────────────────── */}
-        <BentoCard title="Daily Summary" subtitle="Record activity calendar" icon={Calendar} action={viewToggle}>
+        <BentoCard
+          variant="compact"
+          title="Daily Summary"
+          subtitle="Record activity calendar"
+          icon={Calendar}
+          action={viewToggle}
+        >
           {/* Navigation */}
           <div className="mb-4 flex items-center justify-between">
             <button onClick={view === "monthly" ? prevMonth : view === "weekly" ? prevWeek : prevDay} className="rounded-2xl p-2 hover:bg-white/50 transition">
@@ -326,7 +332,7 @@ export default function DailySummaryCalendar({ barangayFilter }: { barangayFilte
 
         {/* ── RIGHT: Side Panel ──────────────────────────────────────────── */}
         {view !== "daily" && (
-          <BentoCard className="flex flex-col">
+          <BentoCard variant="compact" className="flex flex-col">
             <div className="mb-5 border-b border-slate-100 pb-4">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{selectedDayOfWeek}</p>
               <h3 className="text-xl font-black text-slate-900 tracking-tight">{selectedDayFormatted}</h3>

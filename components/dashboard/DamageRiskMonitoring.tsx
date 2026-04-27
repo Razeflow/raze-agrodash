@@ -1,6 +1,6 @@
 "use client";
 import { useAgriData } from "@/lib/agri-context";
-import { COMMODITY_COLORS } from "@/lib/data";
+import { COMMODITY_COLORS, CALAMITY_SUB_CATEGORY_LABELS } from "@/lib/data";
 import { AlertTriangle, Bug, CloudLightning, MapPin, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
@@ -84,9 +84,18 @@ export default function DamageRiskMonitoring() {
         if (!pestMap[r.commodity].includes(p)) pestMap[r.commodity].push(p);
       });
     }
-    if (r.calamity !== "None") {
+    const subLabel =
+      r.calamity_sub_category !== "None" ? CALAMITY_SUB_CATEGORY_LABELS[r.calamity_sub_category] : null;
+    const eventPart = r.calamity !== "None" ? r.calamity : "";
+    const calamityKey =
+      subLabel != null
+        ? eventPart
+          ? `${subLabel} — ${eventPart}`
+          : subLabel
+        : eventPart || null;
+    if (calamityKey) {
       if (!calamityMap[r.commodity]) calamityMap[r.commodity] = [];
-      if (!calamityMap[r.commodity].includes(r.calamity)) calamityMap[r.commodity].push(r.calamity);
+      if (!calamityMap[r.commodity].includes(calamityKey)) calamityMap[r.commodity].push(calamityKey);
     }
   });
 

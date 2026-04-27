@@ -1,3 +1,48 @@
+export type CalamitySubCategory =
+  | "None"
+  | "Typhoon"
+  | "Flood"
+  | "Drought"
+  | "Landslide"
+  | "Fire"
+  | "Hail"
+  | "Earthquake"
+  | "Other";
+
+export const CALAMITY_SUB_CATEGORIES: CalamitySubCategory[] = [
+  "None",
+  "Typhoon",
+  "Flood",
+  "Drought",
+  "Landslide",
+  "Fire",
+  "Hail",
+  "Earthquake",
+  "Other",
+];
+
+export const CALAMITY_SUB_CATEGORY_LABELS: Record<CalamitySubCategory, string> = {
+  None: "None",
+  Typhoon: "Typhoon",
+  Flood: "Flood",
+  Drought: "Drought",
+  Landslide: "Landslide",
+  Fire: "Fire",
+  Hail: "Hail",
+  Earthquake: "Earthquake",
+  Other: "Other",
+};
+
+export function isCalamitySubCategory(s: string): s is CalamitySubCategory {
+  return (CALAMITY_SUB_CATEGORIES as readonly string[]).includes(s);
+}
+
+/** Map DB / legacy values to a known category; unknown strings become `Other`. */
+export function normalizeCalamitySubCategory(raw: unknown): CalamitySubCategory {
+  if (typeof raw !== "string" || raw === "") return "None";
+  return isCalamitySubCategory(raw) ? raw : "Other";
+}
+
 export type AgriRecord = {
   id: string;
   barangay: string;
@@ -16,6 +61,8 @@ export type AgriRecord = {
   harvesting_fishery: number;  // Fishery only
   pests_diseases: string;
   calamity: string;
+  /** Controlled type: Typhoon, Flood, etc.; use `calamity` for event name / detail. */
+  calamity_sub_category: CalamitySubCategory;
   remarks: string;
   period_month: number | null; // 1-12 reporting month
   period_year: number | null;  // e.g. 2026
@@ -23,13 +70,128 @@ export type AgriRecord = {
   updated_at: string;          // ISO timestamp
 };
 
+export type OrgType = "cooperative" | "association" | "household_group" | "other";
+
+export type Organization = {
+  id: string;
+  name: string;
+  org_type: OrgType;
+  barangay: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Household = {
+  id: string;
+  barangay: string;
+  display_name: string;
+  farming_area_hectares: number;
+  rffa_subsidies_notes: string;
+  organization_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FarmerOrganizationRow = {
+  farmer_id: string;
+  organization_id: string;
+};
+
+export type SubsidyCategory =
+  | "fish_fingerlings"
+  | "fertilizer"
+  | "cash"
+  | "seeds"
+  | "rice_seeds"
+  | "other";
+
+export const SUBSIDY_CATEGORIES: SubsidyCategory[] = [
+  "fish_fingerlings",
+  "fertilizer",
+  "cash",
+  "seeds",
+  "rice_seeds",
+  "other",
+];
+
+export const SUBSIDY_CATEGORY_LABELS: Record<SubsidyCategory, string> = {
+  fish_fingerlings: "Fish fingerlings",
+  fertilizer: "Fertilizer",
+  cash: "Cash subsidy",
+  seeds: "Seeds (other)",
+  rice_seeds: "Rice seeds",
+  other: "Other assistance",
+};
+
+export type HouseholdSubsidy = {
+  id: string;
+  household_id: string;
+  category: SubsidyCategory;
+  product_detail: string | null;
+  quantity: number | null;
+  unit: string | null;
+  amount_php: number | null;
+  program_source: string | null;
+  received_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function isSubsidyCategory(s: string): s is SubsidyCategory {
+  return (SUBSIDY_CATEGORIES as readonly string[]).includes(s);
+}
+
+/** Compact string for CSV / roster (e.g. "Fertilizer:Urea x2 bag; Cash subsidy PHP 3000"). */
+export function formatHouseholdSubsidySummary(subs: HouseholdSubsidy[]): string {
+  if (subs.length === 0) return "";
+  return subs
+    .map((s) => {
+      const label = SUBSIDY_CATEGORY_LABELS[s.category];
+      const det = s.product_detail?.trim() ? `:${s.product_detail.trim()}` : "";
+      const qty =
+        s.quantity != null && !Number.isNaN(s.quantity)
+          ? ` x${s.quantity}${s.unit?.trim() ? ` ${s.unit.trim()}` : ""}`
+          : "";
+      const amt =
+        s.amount_php != null && !Number.isNaN(s.amount_php)
+          ? ` ${s.category === "cash" ? "PHP " : ""}${s.amount_php}`
+          : "";
+      return `${label}${det}${qty}${amt}`.replace(/\s+/g, " ").trim();
+    })
+    .join("; ");
+}
+
 export type Farmer = {
   id: string;
   name: string;
   gender: "Male" | "Female";
   barangay: string;
+  household_id: string | null;
+  /** Exactly one head per household is enforced in the app when marking a farmer as head. */
+  is_household_head: boolean;
+  rsbsa_number: string | null;
+  birth_date: string | null;
+  civil_status: string | null;
+  photo_url: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export const CIVIL_STATUS_OPTIONS = [
+  "Single",
+  "Married",
+  "Widowed",
+  "Separated",
+  "Divorced",
+  "Common-law",
+] as const;
+
+export const ORG_TYPE_LABELS: Record<OrgType, string> = {
+  cooperative: "Cooperative",
+  association: "Association",
+  household_group: "Household group",
+  other: "Other",
 };
 
 export const BARANGAYS = [

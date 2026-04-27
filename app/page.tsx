@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import LoginPage from "@/components/LoginPage";
 import KpiCards from "@/components/dashboard/KpiCards";
 import CommodityAnalytics from "@/components/dashboard/CommodityAnalytics";
@@ -15,10 +16,11 @@ import BarangayLeaderboard from "@/components/dashboard/BarangayLeaderboard";
 import ExportButton from "@/components/dashboard/ExportButton";
 import PasswordChangeDialog from "@/components/dashboard/PasswordChangeDialog";
 import UserManagement from "@/components/dashboard/UserManagement";
+import ProgramsView from "@/components/dashboard/ProgramsView";
 import { BARANGAYS } from "@/lib/data";
 import {
   Sprout, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList,
-  LogOut, Key, UserCog, MapPin, TrendingUp,
+  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins,
 } from "lucide-react";
 
 const TAB_DESCRIPTIONS: Record<string, string> = {
@@ -26,15 +28,26 @@ const TAB_DESCRIPTIONS: Record<string, string> = {
   damage: "Weather alerts & loss data",
   farmers: "Municipal database",
   records: "Production logs",
+  programs: "RFFA, subsidies & organizations",
   manage: "System configuration",
   users: "Admin roles",
 };
+
+type OverviewSection = "summary" | "trends" | "activity" | "rankings";
+
+const OVERVIEW_SECTION_TABS: { id: OverviewSection; label: string; adminOnly?: boolean }[] = [
+  { id: "summary", label: "Summary" },
+  { id: "trends", label: "Trends" },
+  { id: "activity", label: "Activity" },
+  { id: "rankings", label: "Rankings", adminOnly: true },
+];
 
 const ALL_TABS = [
   { id: "overview",  label: "Overview",      icon: BarChart2,      adminOnly: false, superAdminOnly: false },
   { id: "damage",    label: "Damage & Risk", icon: AlertTriangle,  adminOnly: false, superAdminOnly: false },
   { id: "farmers",   label: "Farmers",       icon: Users,          adminOnly: false, superAdminOnly: false },
   { id: "records",   label: "Records",       icon: Table2,         adminOnly: false, superAdminOnly: false },
+  { id: "programs",  label: "Programs",      icon: HandCoins,      adminOnly: false, superAdminOnly: false },
   { id: "manage",    label: "Management",    icon: ClipboardList,  adminOnly: true,  superAdminOnly: false },
   { id: "users",     label: "Users",         icon: UserCog,        adminOnly: false, superAdminOnly: true },
 ];
@@ -43,8 +56,33 @@ export default function Page() {
   const { isLoggedIn, user, logout, isAdminOrAbove, isBarangayUser, isSuperAdmin } = useAuth();
   const [tab, setTab] = useState("overview");
   const [menuOpen, setMenuOpen] = useState(false);
+  const mobileBackdrop = useAnimatedMount(menuOpen, 200);
   const [pwDialogOpen, setPwDialogOpen] = useState(false);
   const [overviewBarangay, setOverviewBarangay] = useState("All");
+  const [overviewSection, setOverviewSection] = useState<OverviewSection>("summary");
+  const [shellReady, setShellReady] = useState(false);
+
+  useEffect(() => {
+    if (!isAdminOrAbove && overviewSection === "rankings") {
+      setOverviewSection("summary");
+    }
+  }, [isAdminOrAbove, overviewSection]);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setShellReady(false);
+      return;
+    }
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setShellReady(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [isLoggedIn]);
 
   if (!isLoggedIn) return <LoginPage />;
 
@@ -59,7 +97,10 @@ export default function Page() {
   const today = new Date().toLocaleDateString("en-US", { timeZone: "Asia/Manila", month: "long", day: "numeric", year: "numeric" });
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg)" }}>
+    <div
+      className={`min-h-screen ${shellReady ? "dashboard-shell-enter" : "pointer-events-none opacity-0"}`}
+      style={{ background: "var(--bg)" }}
+    >
       {/* ── Collapsible Sidebar ──────────────────────────────────────────── */}
       <aside
         className={`
@@ -117,15 +158,39 @@ export default function Page() {
 
         {/* Profile */}
         <div className="mt-auto">
-          {/* Change Password / Logout visible on hover */}
-          <div className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 space-y-2 mb-3">
+          {/* Desktop collapsed rail: icon-only (always visible without hover) */}
+          <div className="mb-3 hidden flex-col items-center gap-2 lg:flex lg:group-hover/sidebar:hidden">
             <button
+              type="button"
+              onClick={() => setPwDialogOpen(true)}
+              className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-slate-100 text-slate-400 transition hover:bg-white hover:text-slate-700 hover:shadow-md"
+              title="Change password"
+              aria-label="Change password"
+            >
+              <Key size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-slate-100 text-slate-400 transition hover:bg-red-50 hover:text-red-500 hover:border-red-100"
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
+
+          {/* Mobile + desktop expanded: full label buttons */}
+          <div className="mb-3 flex flex-col gap-2 lg:hidden lg:group-hover/sidebar:flex">
+            <button
+              type="button"
               onClick={() => setPwDialogOpen(true)}
               className="flex w-full items-center justify-center gap-2 rounded-[1.5rem] border border-slate-100 px-3 py-2 text-xs font-bold text-slate-400 transition hover:bg-white hover:text-slate-700 hover:shadow-md"
             >
               <Key size={14} /> Change Password
             </button>
             <button
+              type="button"
               onClick={logout}
               className="flex w-full items-center justify-center gap-2 rounded-[1.5rem] border border-slate-100 px-3 py-2 text-xs font-bold text-slate-400 transition hover:bg-red-50 hover:text-red-500 hover:border-red-100"
             >
@@ -146,8 +211,11 @@ export default function Page() {
       </aside>
 
       {/* Mobile backdrop */}
-      {menuOpen && (
-        <div className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm lg:hidden" onClick={() => setMenuOpen(false)} />
+      {mobileBackdrop.mounted && (
+        <div
+          className={`fixed inset-0 z-30 lg:hidden backdrop-animate ${mobileBackdrop.visible ? "backdrop-animate-visible" : ""}`}
+          onClick={() => setMenuOpen(false)}
+        />
       )}
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
@@ -176,43 +244,68 @@ export default function Page() {
         </header>
 
         {/* Content */}
-        <main className="px-10 pb-20 space-y-8 max-w-screen-2xl">
-          {tab === "overview" && (
-            <>
-              {isAdminOrAbove && (
-                <div className="flex items-center gap-3">
-                  <MapPin size={14} className="text-emerald-600" />
-                  <select
-                    className="h-10 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-4 pr-8 text-xs font-black text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition shadow-sm"
-                    value={overviewBarangay}
-                    onChange={(e) => setOverviewBarangay(e.target.value)}
-                  >
-                    <option value="All">All Barangays</option>
-                    {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                  {overviewBarangay !== "All" && (
-                    <button
-                      onClick={() => setOverviewBarangay("All")}
-                      className="rounded-[1.5rem] bg-emerald-100 px-3 py-1.5 text-[10px] font-black text-emerald-700 hover:bg-emerald-200 transition uppercase tracking-widest"
+        <main className="max-w-screen-2xl px-10 pb-20">
+          <div key={tab} className="space-y-8 tab-pane-enter">
+            {tab === "overview" && (
+              <>
+                {isAdminOrAbove && (
+                  <div className="flex items-center gap-3">
+                    <MapPin size={14} className="text-emerald-600" />
+                    <select
+                      className="h-10 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-4 pr-8 text-xs font-black text-slate-700 outline-none transition shadow-sm focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                      value={overviewBarangay}
+                      onChange={(e) => setOverviewBarangay(e.target.value)}
                     >
-                      Clear
+                      <option value="All">All Barangays</option>
+                      {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    {overviewBarangay !== "All" && (
+                      <button
+                        onClick={() => setOverviewBarangay("All")}
+                        className="rounded-[1.5rem] bg-emerald-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-200"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                )}
+                <KpiCards barangayFilter={overviewBarangay} />
+                <div className="flex flex-wrap gap-2">
+                  {OVERVIEW_SECTION_TABS.filter((s) => !s.adminOnly || isAdminOrAbove).map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setOverviewSection(s.id)}
+                      className={`rounded-[1.5rem] px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all duration-300 ${
+                        overviewSection === s.id
+                          ? "bg-slate-950 text-white shadow-lg shadow-slate-300"
+                          : "border border-white/40 bg-white/50 text-slate-500 hover:bg-white hover:text-slate-800"
+                      }`}
+                    >
+                      {s.label}
                     </button>
-                  )}
+                  ))}
                 </div>
-              )}
-              <KpiCards barangayFilter={overviewBarangay} />
-              <FindingMatrix barangayFilter={overviewBarangay} />
-              <DailySummaryCalendar barangayFilter={overviewBarangay} />
-              {isAdminOrAbove && <BarangayLeaderboard barangayFilter={overviewBarangay} />}
-              <CommodityAnalytics barangayFilter={overviewBarangay} />
-              <SubCategoryAnalytics barangayFilter={overviewBarangay} />
-            </>
-          )}
-          {tab === "damage" && <DamageRiskMonitoring />}
-          {tab === "farmers" && <FarmerDistribution />}
-          {tab === "records" && <DataTable />}
-          {tab === "manage" && isAdminOrAbove && <ManagementView />}
-          {tab === "users" && isSuperAdmin && <UserManagement />}
+                {overviewSection === "summary" && <FindingMatrix barangayFilter={overviewBarangay} />}
+                {overviewSection === "trends" && (
+                  <div className="space-y-8">
+                    <CommodityAnalytics barangayFilter={overviewBarangay} />
+                    <SubCategoryAnalytics barangayFilter={overviewBarangay} />
+                  </div>
+                )}
+                {overviewSection === "activity" && <DailySummaryCalendar barangayFilter={overviewBarangay} />}
+                {overviewSection === "rankings" && isAdminOrAbove && (
+                  <BarangayLeaderboard barangayFilter={overviewBarangay} />
+                )}
+              </>
+            )}
+            {tab === "damage" && <DamageRiskMonitoring />}
+            {tab === "farmers" && <FarmerDistribution />}
+            {tab === "records" && <DataTable />}
+            {tab === "programs" && <ProgramsView />}
+            {tab === "manage" && isAdminOrAbove && <ManagementView />}
+            {tab === "users" && isSuperAdmin && <UserManagement />}
+          </div>
         </main>
       </div>
 

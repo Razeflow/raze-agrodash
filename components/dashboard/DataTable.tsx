@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
-import { COMMODITY_COLORS, formatPeriod, MONTH_NAMES, BARANGAYS } from "@/lib/data";
+import { COMMODITY_COLORS, formatPeriod, MONTH_NAMES, BARANGAYS, CALAMITY_SUB_CATEGORY_LABELS } from "@/lib/data";
 import type { AgriRecord } from "@/lib/data";
 import { Search, Filter, Plus, Pencil, Trash2, CalendarDays, MapPin } from "lucide-react";
 import RecordFormDialog from "./RecordFormDialog";
@@ -77,7 +77,9 @@ export default function DataTable() {
         r.commodity.toLowerCase().includes(q) ||
         r.sub_category.toLowerCase().includes(q) ||
         r.pests_diseases.toLowerCase().includes(q) ||
-        r.calamity.toLowerCase().includes(q);
+        r.calamity.toLowerCase().includes(q) ||
+        r.calamity_sub_category.toLowerCase().includes(q) ||
+        CALAMITY_SUB_CATEGORY_LABELS[r.calamity_sub_category].toLowerCase().includes(q);
       return matchCom && matchBarangay && matchPeriod && matchSearch;
     });
   }, [records, search, filter, barangayFilter, periodFilter]);
@@ -165,7 +167,7 @@ export default function DataTable() {
               <table className="w-full text-left">
                 <thead>
                   <tr className="bg-white/30 backdrop-blur">
-                    {["Barangay","Period","Commodity","Sub-category","Male","Female","Total","Area (ha)","Harvest (bags)","Damage (ha)","Pests / Diseases","Calamity",""].map((h) => (
+                    {["Barangay","Period","Commodity","Sub-category","Male","Female","Total","Area (ha)","Harvest (bags)","Damage (ha)","Pests / Diseases","Calamity type","Event",""].map((h) => (
                       <th
                         key={h}
                         className="whitespace-nowrap px-3 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-white/30"
@@ -203,11 +205,16 @@ export default function DataTable() {
                           {r.pests_diseases === "None" ? <span className="text-slate-300">—</span> : r.pests_diseases}
                         </td>
                         <td className="px-3 py-2.5 text-xs whitespace-nowrap">
-                          {r.calamity === "None" ? (
+                          {r.calamity_sub_category === "None" ? (
                             <span className="text-slate-300">—</span>
                           ) : (
-                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-500">{r.calamity}</span>
+                            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                              {CALAMITY_SUB_CATEGORY_LABELS[r.calamity_sub_category]}
+                            </span>
                           )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-slate-600 max-w-[140px]">
+                          {r.calamity === "None" ? <span className="text-slate-300">—</span> : r.calamity}
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
                           <div className="flex gap-1">

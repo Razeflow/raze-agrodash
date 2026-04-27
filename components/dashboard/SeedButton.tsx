@@ -5,7 +5,7 @@ import { seedData } from "@/lib/seed-data";
 
 export default function SeedButton() {
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
-  const [result, setResult] = useState<{ farmersAdded: number; recordsAdded: number } | null>(null);
+  const [result, setResult] = useState<{ farmersAdded: number; recordsAdded: number; orgsAdded: number; householdsAdded: number; subsidiesAdded: number } | null>(null);
 
   function handleSeed() {
     if (status === "loading") return;
@@ -17,7 +17,7 @@ export default function SeedButton() {
       setResult(res);
       setStatus("done");
 
-      if (res.farmersAdded > 0 || res.recordsAdded > 0) {
+      if (res.farmersAdded > 0 || res.recordsAdded > 0 || res.orgsAdded > 0) {
         // Reload the page so the context picks up new localStorage data
         setTimeout(() => window.location.reload(), 800);
       }
@@ -34,7 +34,7 @@ export default function SeedButton() {
     }
     return (
       <span className="flex items-center gap-1.5 rounded-[1.5rem] bg-emerald-100 px-3 py-1.5 text-xs font-medium text-emerald-700">
-        <CheckCircle2 size={13} /> +{result.farmersAdded} farmers, +{result.recordsAdded} records — reloading…
+        <CheckCircle2 size={13} /> +{result.farmersAdded} farmers, +{result.recordsAdded} records, +{result.householdsAdded} households, +{result.orgsAdded} orgs — reloading…
       </span>
     );
   }

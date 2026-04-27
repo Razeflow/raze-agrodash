@@ -39,7 +39,13 @@ export default function SubCategoryAnalytics({ barangayFilter }: { barangayFilte
   }, [records, active]);
 
   return (
-    <BentoCard title="Sub-Category Breakdown" subtitle="Production per variety / type" icon={Warehouse} className="fade-up delay-2">
+    <BentoCard
+      variant="compact"
+      title="Sub-Category Breakdown"
+      subtitle="Production per variety / type"
+      icon={Warehouse}
+      className="fade-up delay-2"
+    >
       <div className="mb-6 flex flex-wrap gap-3">
         {COMMODITIES.map((c) => (
           <button

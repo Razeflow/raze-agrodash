@@ -2,9 +2,20 @@
 import { useState, useEffect } from "react";
 import { X, Users, CheckCircle2, AlertCircle } from "lucide-react";
 import type { AgriRecord } from "@/lib/data";
-import { BARANGAYS, COMMODITY_OPTIONS, SUB_TYPES, getCurrentPHPeriod, MONTH_NAMES } from "@/lib/data";
+import {
+  BARANGAYS,
+  COMMODITY_OPTIONS,
+  SUB_TYPES,
+  getCurrentPHPeriod,
+  MONTH_NAMES,
+  CALAMITY_SUB_CATEGORIES,
+  CALAMITY_SUB_CATEGORY_LABELS,
+  type CalamitySubCategory,
+} from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import DialogPortal from "@/components/ui/DialogPortal";
 import FarmerSelectDialog from "./FarmerSelectDialog";
 
 type Props = {
@@ -38,6 +49,7 @@ function getEmptyForm() {
     harvesting_fishery: 0,
     pests_diseases: "None",
     calamity: "None",
+    calamity_sub_category: "None" as CalamitySubCategory,
     remarks: "",
   };
 }
@@ -45,16 +57,20 @@ function getEmptyForm() {
 export default function RecordFormDialog({ open, onClose, mode, initialData, defaultBarangay }: Props) {
   const { addRecord, updateRecord, getFarmersByIds } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
+  const { mounted, visible } = useAnimatedMount(open);
   const availableBarangays = isBarangayUser && userBarangay ? [userBarangay] : BARANGAYS;
   const [form, setForm] = useState(getEmptyForm());
   const [farmerSelectOpen, setFarmerSelectOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setSuccessMsg(null);
+      setErrorMsg(null);
       setErrors({});
       setSubmitted(false);
       if (mode === "edit" && initialData) {
@@ -73,6 +89,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           harvesting_fishery: initialData.harvesting_fishery,
           pests_diseases: initialData.pests_diseases,
           calamity: initialData.calamity,
+          calamity_sub_category: initialData.calamity_sub_category ?? "None",
           remarks: initialData.remarks,
         });
       } else {
@@ -82,7 +99,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     }
   }, [open, mode, initialData, defaultBarangay, isBarangayUser, userBarangay]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   const isFishery = form.commodity === "Fishery";
   const isCorn = form.commodity === "Corn";
@@ -113,13 +130,16 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       damage_calamity_hectares: commodity === "Fishery" ? 0 : f.damage_calamity_hectares,
       stocking: commodity === "Fishery" ? f.stocking : 0,
       harvesting_fishery: commodity === "Fishery" ? f.harvesting_fishery : 0,
+      calamity: commodity === "Fishery" ? "None" : f.calamity,
+      calamity_sub_category: commodity === "Fishery" ? "None" : f.calamity_sub_category,
     }));
     if (submitted) setErrors((e) => ({ ...e, commodity: undefined }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
+    setErrorMsg(null);
     const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
@@ -131,17 +151,33 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       period_month: form.period_month,
       period_year: form.period_year,
     };
-    if (mode === "edit" && initialData) {
-      updateRecord(initialData.id, data);
-      onClose();
-    } else {
-      addRecord(data);
-      setSuccessMsg("Record added successfully!");
-      const empty = getEmptyForm();
-      setForm({ ...empty, barangay: form.barangay });
-      setErrors({});
-      setSubmitted(false);
-      setTimeout(() => setSuccessMsg(null), 1500);
+    setSaving(true);
+    try {
+      if (mode === "edit" && initialData) {
+        const res = await updateRecord(initialData.id, data);
+        if (!res.ok) {
+          setErrorMsg(res.message);
+          return;
+        }
+        onClose();
+      } else {
+        const result = await addRecord(data);
+        if (!result.ok) {
+          setErrorMsg(result.message);
+          return;
+        }
+        setSuccessMsg("Record added successfully!");
+        const empty = getEmptyForm();
+        setForm({ ...empty, barangay: form.barangay });
+        setErrors({});
+        setSubmitted(false);
+        setTimeout(() => setSuccessMsg(null), 1500);
+      }
+    } catch (err) {
+      console.error("[RecordForm] submit error", err);
+      setErrorMsg(err instanceof Error ? err.message : "Unexpected error while saving.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -152,9 +188,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
-        <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={onClose} />
-        <div className="relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl">
+      <DialogPortal>
+      <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
+        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+        <div className="flex min-h-full items-center justify-center p-4">
+        <div className={`relative z-10 w-full max-w-2xl rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
           <div className="mb-5 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-800">
               {mode === "add" ? "Add New Record" : "Edit Record"}
@@ -167,6 +205,13 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           {successMsg && (
             <div className="mb-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/50 px-4 py-2.5 text-sm font-medium text-green-700 flex items-center gap-2 animate-in">
               <CheckCircle2 size={16} /> {successMsg}
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="mb-4 rounded-2xl bg-red-50/70 border border-red-200/50 px-4 py-2.5 text-sm font-medium text-red-700 flex items-center gap-2">
+              <AlertCircle size={16} className="shrink-0" />
+              <span>{errorMsg}</span>
             </div>
           )}
 
@@ -315,8 +360,27 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                 <input className={inputCls} value={form.pests_diseases} onChange={(e) => setForm((f) => ({ ...f, pests_diseases: e.target.value }))} placeholder="e.g. Rice Blast, Stem Borer or None" />
               </div>
               <div>
-                <label className={labelCls}>Calamity</label>
-                <input className={inputCls} value={form.calamity} onChange={(e) => setForm((f) => ({ ...f, calamity: e.target.value }))} placeholder="e.g. Typhoon Egay or None" />
+                <label className={labelCls}>Calamity type</label>
+                <select
+                  className={inputCls}
+                  value={form.calamity_sub_category}
+                  onChange={(e) => setForm((f) => ({ ...f, calamity_sub_category: e.target.value as CalamitySubCategory }))}
+                >
+                  {CALAMITY_SUB_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {CALAMITY_SUB_CATEGORY_LABELS[c]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className={labelCls}>Calamity event or name</label>
+                <input
+                  className={inputCls}
+                  value={form.calamity}
+                  onChange={(e) => setForm((f) => ({ ...f, calamity: e.target.value }))}
+                  placeholder="e.g. Typhoon Egay, barangay sitio — or None"
+                />
               </div>
             </div>
 
@@ -329,13 +393,15 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             {/* Actions */}
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={onClose} className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition">{mode === "add" ? "Close" : "Cancel"}</button>
-              <button type="submit" className="rounded-[1.5rem] bg-emerald-600 px-5 py-2 text-sm font-black text-white shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition">
-                {mode === "add" ? "Add Record" : "Save Changes"}
+              <button type="submit" disabled={saving} className={`rounded-[1.5rem] px-5 py-2 text-sm font-black text-white shadow-lg transition ${saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"}`}>
+                {saving ? "Saving…" : mode === "add" ? "Add Record" : "Save Changes"}
               </button>
             </div>
           </form>
         </div>
+        </div>
       </div>
+      </DialogPortal>
 
       <FarmerSelectDialog
         open={farmerSelectOpen}

@@ -2,6 +2,8 @@
 import { AlertTriangle, X } from "lucide-react";
 import type { AgriRecord } from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
+import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import DialogPortal from "@/components/ui/DialogPortal";
 
 type Props = {
   open: boolean;
@@ -11,8 +13,9 @@ type Props = {
 
 export default function DeleteConfirmDialog({ open, onClose, record }: Props) {
   const { deleteRecord } = useAgriData();
+  const { mounted, visible } = useAnimatedMount(open);
 
-  if (!open || !record) return null;
+  if (!mounted || !record) return null;
 
   function handleDelete() {
     if (record) {
@@ -22,9 +25,11 @@ export default function DeleteConfirmDialog({ open, onClose, record }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl">
+    <DialogPortal>
+    <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
+      <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+      <div className="flex min-h-full items-center justify-center p-4">
+      <div className={`relative z-10 w-full max-w-md rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-3 rounded-2xl bg-red-100">
@@ -56,6 +61,8 @@ export default function DeleteConfirmDialog({ open, onClose, record }: Props) {
           </button>
         </div>
       </div>
+      </div>
     </div>
+    </DialogPortal>
   );
 }
