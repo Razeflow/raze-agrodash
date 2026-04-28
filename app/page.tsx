@@ -29,7 +29,7 @@ const TAB_DESCRIPTIONS: Record<string, string> = {
   farmers: "Municipal database",
   records: "Production logs",
   programs: "RFFA, subsidies & organizations",
-  manage: "System configuration",
+  manage: "Barangay user credentials",
   users: "Admin roles",
 };
 
@@ -49,7 +49,7 @@ const ALL_TABS = [
   { id: "records",   label: "Records",       icon: Table2,         adminOnly: false, superAdminOnly: false },
   { id: "programs",  label: "Programs",      icon: HandCoins,      adminOnly: false, superAdminOnly: false },
   { id: "manage",    label: "Management",    icon: ClipboardList,  adminOnly: true,  superAdminOnly: false },
-  { id: "users",     label: "Users",         icon: UserCog,        adminOnly: false, superAdminOnly: true },
+  { id: "users",     label: "Users",         icon: UserCog,        adminOnly: true,  superAdminOnly: false },
 ];
 
 export default function Page() {
@@ -222,7 +222,7 @@ export default function Page() {
       <div className="lg:pl-24 transition-all duration-500">
         {/* Hero Header */}
         <header className="px-10 pt-10 pb-6">
-          <div className="flex justify-between items-end">
+          <div className="flex justify-between items-end gap-4 flex-wrap">
             <div>
               {/* Mobile menu button */}
               <button
@@ -238,8 +238,32 @@ export default function Page() {
               <h2 className="text-4xl lg:text-5xl font-black text-slate-950 tracking-tighter">
                 {tabs.find((t) => t.id === tab)?.label || "Overview"}
               </h2>
-              <p className="text-slate-500 font-bold mt-1">{today} {isAdminOrAbove && <ExportButton />}</p>
+              <p className="text-slate-500 font-bold mt-1">{today}</p>
             </div>
+            {isAdminOrAbove && (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur px-4 py-2.5 shadow-sm">
+                  <MapPin size={16} className="text-emerald-600" />
+                  <select
+                    className="appearance-none bg-transparent pr-2 text-sm font-black text-slate-700 outline-none cursor-pointer"
+                    value={overviewBarangay}
+                    onChange={(e) => setOverviewBarangay(e.target.value)}
+                  >
+                    <option value="All">All Barangays</option>
+                    {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                  {overviewBarangay !== "All" && (
+                    <button
+                      onClick={() => setOverviewBarangay("All")}
+                      className="rounded-[1rem] bg-emerald-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-200"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <ExportButton />
+              </div>
+            )}
           </div>
         </header>
 
@@ -248,27 +272,6 @@ export default function Page() {
           <div key={tab} className="space-y-8 tab-pane-enter">
             {tab === "overview" && (
               <>
-                {isAdminOrAbove && (
-                  <div className="flex items-center gap-3">
-                    <MapPin size={14} className="text-emerald-600" />
-                    <select
-                      className="h-10 appearance-none rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur pl-4 pr-8 text-xs font-black text-slate-700 outline-none transition shadow-sm focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                      value={overviewBarangay}
-                      onChange={(e) => setOverviewBarangay(e.target.value)}
-                    >
-                      <option value="All">All Barangays</option>
-                      {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                    {overviewBarangay !== "All" && (
-                      <button
-                        onClick={() => setOverviewBarangay("All")}
-                        className="rounded-[1.5rem] bg-emerald-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-200"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                )}
                 <KpiCards barangayFilter={overviewBarangay} />
                 <div className="flex flex-wrap gap-2">
                   {OVERVIEW_SECTION_TABS.filter((s) => !s.adminOnly || isAdminOrAbove).map((s) => (
@@ -304,7 +307,7 @@ export default function Page() {
             {tab === "records" && <DataTable />}
             {tab === "programs" && <ProgramsView />}
             {tab === "manage" && isAdminOrAbove && <ManagementView />}
-            {tab === "users" && isSuperAdmin && <UserManagement />}
+            {tab === "users" && isAdminOrAbove && <UserManagement />}
           </div>
         </main>
       </div>

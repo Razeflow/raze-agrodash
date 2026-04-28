@@ -115,7 +115,20 @@ CREATE TABLE IF NOT EXISTS public.agri_records (
 ALTER TABLE public.agri_records
   ADD COLUMN IF NOT EXISTS calamity_sub_category TEXT NOT NULL DEFAULT 'None';
 
+-- Migration 007: reporting period (form already collects month/year; columns persist them)
+ALTER TABLE public.agri_records
+  ADD COLUMN IF NOT EXISTS period_month SMALLINT,
+  ADD COLUMN IF NOT EXISTS period_year  SMALLINT;
+
+-- Backfill any rows missing a period from created_at (Asia/Manila).
+UPDATE public.agri_records
+SET
+  period_month = EXTRACT(MONTH FROM (created_at AT TIME ZONE 'Asia/Manila'))::smallint,
+  period_year  = EXTRACT(YEAR  FROM (created_at AT TIME ZONE 'Asia/Manila'))::smallint
+WHERE period_month IS NULL OR period_year IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_agri_records_barangay ON public.agri_records(barangay);
+CREATE INDEX IF NOT EXISTS idx_agri_records_period ON public.agri_records(period_year, period_month);
 
 -- =====================================================================
 -- 2) ROW LEVEL SECURITY

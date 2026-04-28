@@ -162,9 +162,9 @@ export default function ExportButton() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-[1.5rem] bg-white/50 backdrop-blur border border-white/40 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-white/70 transition"
+        className="flex items-center gap-2 rounded-[1.5rem] bg-white/50 backdrop-blur border border-white/40 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-white/70 hover:text-slate-900 transition shadow-sm"
       >
-        <Download size={13} /> Export
+        <Download size={16} /> Export
       </button>
 
       {dropdown.mounted && (

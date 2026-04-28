@@ -9,6 +9,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { supabase } from "@/lib/supabase/client";
 
 // ── Types (exported so downstream can import) ──────────────────────────
 
@@ -16,6 +17,13 @@ export type UserRole = "SUPER_ADMIN" | "ADMIN" | "BARANGAY_USER";
 
 export type UserProfile = {
   id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  barangay: string | null;
+};
+
+export type ManagedUser = {
   username: string;
   displayName: string;
   role: UserRole;
@@ -39,17 +47,12 @@ export type AuthContextValue = {
     confirmPw: string,
   ) => Promise<{ success: boolean; error?: string }>;
   resetUserPassword: (username: string, newPw: string) => Promise<boolean>;
-  allUsers: {
-    username: string;
-    displayName: string;
-    role: UserRole;
-    barangay: string | null;
-  }[];
+  allUsers: ManagedUser[];
 };
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "agridash-auth-user";
+const EMAIL_DOMAIN = "@agridash.local";
 
 // ── Context ────────────────────────────────────────────────────────────
 
@@ -57,26 +60,26 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-/** Build a SUPER_ADMIN profile for the given username. */
-function makeProfile(username: string): UserProfile {
-  return {
-    id: `local-${username.toLowerCase()}`,
-    username: username.toLowerCase(),
-    displayName: username,
-    role: "SUPER_ADMIN",
-    barangay: null,
-  };
+function usernameToEmail(username: string): string {
+  return `${username.trim().toLowerCase()}${EMAIL_DOMAIN}`;
 }
 
-/** Read stored profile from localStorage (returns null if absent/invalid). */
-function readStoredUser(): UserProfile | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as UserProfile;
-  } catch {
-    return null;
-  }
+type ProfileRow = {
+  id: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  barangay: string | null;
+};
+
+function rowToProfile(row: ProfileRow): UserProfile {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    role: row.role,
+    barangay: row.barangay,
+  };
 }
 
 // ── Provider ───────────────────────────────────────────────────────────
@@ -84,62 +87,139 @@ function readStoredUser(): UserProfile | null {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [allUsers, setAllUsers] = useState<ManagedUser[]>([]);
 
-  // ── Session restoration on mount ──────────────────────────────────
+  const fetchProfile = useCallback(
+    async (userId: string): Promise<UserProfile | null> => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, username, display_name, role, barangay")
+        .eq("id", userId)
+        .single<ProfileRow>();
+      if (error || !data) return null;
+      return rowToProfile(data);
+    },
+    [],
+  );
+
+  // ── Session restoration + auth state subscription ─────────────────
   useEffect(() => {
-    const stored = readStoredUser();
-    setUser(stored);
-    setLoading(false);
-  }, []);
+    let cancelled = false;
 
-  // ── Derived allUsers list (just the current user if logged in) ────
-  const allUsers = useMemo<
-    { username: string; displayName: string; role: UserRole; barangay: string | null }[]
-  >(() => {
-    if (!user) return [];
-    return [
-      {
-        username: user.username,
-        displayName: user.displayName,
-        role: user.role,
-        barangay: user.barangay,
-      },
-    ];
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id);
+        if (!cancelled) setUser(profile);
+      }
+      if (!cancelled) setLoading(false);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT" || !session?.user) {
+        setUser(null);
+        setAllUsers([]);
+        return;
+      }
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        const profile = await fetchProfile(session.user.id);
+        setUser(profile);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, [fetchProfile]);
+
+  // ── Fetch all users (admin and above only) ────────────────────────
+  useEffect(() => {
+    if (user?.role !== "SUPER_ADMIN" && user?.role !== "ADMIN") {
+      setAllUsers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("username, display_name, role, barangay")
+        .order("role", { ascending: true })
+        .order("username", { ascending: true });
+      if (cancelled || error || !data) return;
+      setAllUsers(
+        data.map((r) => ({
+          username: r.username,
+          displayName: r.display_name,
+          role: r.role,
+          barangay: r.barangay,
+        })),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   // ── login ──────────────────────────────────────────────────────────
   const login = useCallback(
-    async (username: string, _password: string): Promise<true | string> => {
-      const profile = makeProfile(username);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+    async (username: string, password: string): Promise<true | string> => {
+      const email = usernameToEmail(username);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error || !data.user) {
+        return error?.message?.includes("Invalid login credentials")
+          ? "Incorrect username or password."
+          : (error?.message || "Login failed. Please try again.");
+      }
+      const profile = await fetchProfile(data.user.id);
+      if (!profile) return "Account is missing a profile. Contact an administrator.";
       setUser(profile);
       return true;
     },
-    [],
+    [fetchProfile],
   );
 
   // ── logout ─────────────────────────────────────────────────────────
-  const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
     setUser(null);
+    setAllUsers([]);
   }, []);
 
-  // ── changePassword (no-op) ─────────────────────────────────────────
+  // ── changePassword ─────────────────────────────────────────────────
   const changePassword = useCallback(
     async (
-      _current: string,
-      _newPw: string,
-      _confirmPw: string,
+      current: string,
+      newPw: string,
+      confirmPw: string,
     ): Promise<{ success: boolean; error?: string }> => {
+      if (!user) return { success: false, error: "Not signed in." };
+      if (!current || !newPw || !confirmPw) return { success: false, error: "All fields are required." };
+      if (newPw.length < 4) return { success: false, error: "New password must be at least 4 characters." };
+      if (newPw !== confirmPw) return { success: false, error: "Passwords do not match." };
+
+      const email = usernameToEmail(user.username);
+      const { error: verifyErr } = await supabase.auth.signInWithPassword({ email, password: current });
+      if (verifyErr) return { success: false, error: "Current password is incorrect." };
+
+      const { error: updateErr } = await supabase.auth.updateUser({ password: newPw });
+      if (updateErr) return { success: false, error: updateErr.message };
+
       return { success: true };
     },
-    [],
+    [user],
   );
 
-  // ── resetUserPassword (no-op) ──────────────────────────────────────
+  // ── resetUserPassword (admin) ──────────────────────────────────────
   const resetUserPassword = useCallback(
-    async (_username: string, _newPw: string): Promise<boolean> => {
-      return false;
+    async (username: string, newPw: string): Promise<boolean> => {
+      const res = await fetch("/api/admin/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, newPassword: newPw }),
+      });
+      return res.ok;
     },
     [],
   );

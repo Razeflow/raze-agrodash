@@ -1,262 +1,205 @@
 "use client";
 import { useState, useMemo } from "react";
-import { useAgriData } from "@/lib/agri-context";
-import { BARANGAYS, COMMODITY_COLORS, CALAMITY_SUB_CATEGORY_LABELS } from "@/lib/data";
-import type { AgriRecord } from "@/lib/data";
-import { Users, Wheat, MapPin, Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
-import RecordFormDialog from "./RecordFormDialog";
-import DeleteConfirmDialog from "./DeleteConfirmDialog";
-import SeedButton from "./SeedButton";
+import { useAuth } from "@/lib/auth-context";
+import { BARANGAYS } from "@/lib/data";
+import { MapPin, KeyRound, CheckCircle2, X, Shield, AlertTriangle, UserCheck } from "lucide-react";
 import BentoCard from "@/components/ui/BentoCard";
 
-function CommodityBadge({ name }: { name: string }) {
-  const color = COMMODITY_COLORS[name] || "#888";
-  return (
-    <span className="inline-flex items-center rounded-[1rem] px-2.5 py-0.5 text-xs font-bold" style={{ background: color + "18", color }}>
-      {name}
-    </span>
-  );
-}
-
 export default function ManagementView() {
-  const { records, staleBarangays } = useAgriData();
-  const [selected, setSelected] = useState<string>(BARANGAYS[0]);
+  const { allUsers, resetUserPassword, isAdminOrAbove } = useAuth();
 
-  // CRUD state
-  const [formOpen, setFormOpen] = useState(false);
-  const [formMode, setFormMode] = useState<"add" | "edit">("add");
-  const [editRecord, setEditRecord] = useState<AgriRecord | undefined>();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<AgriRecord | null>(null);
+  const [resettingBarangay, setResettingBarangay] = useState<string | null>(null);
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [error, setError] = useState("");
+  const [successBarangay, setSuccessBarangay] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Per-barangay stats
-  const barangayStats = useMemo(() => {
-    const stats: Record<string, { entries: number; farmers: number; production: number; area: number }> = {};
-    BARANGAYS.forEach((b) => {
-      stats[b] = { entries: 0, farmers: 0, production: 0, area: 0 };
-    });
-    records.forEach((r) => {
-      if (stats[r.barangay]) {
-        stats[r.barangay].entries++;
-        stats[r.barangay].farmers += r.total_farmers;
-        stats[r.barangay].production += r.harvesting_output_bags;
-        stats[r.barangay].area += r.planting_area_hectares;
+  // Map barangay → its BARANGAY_USER (if any)
+  const userByBarangay = useMemo(() => {
+    const map = new Map<string, typeof allUsers[number]>();
+    for (const u of allUsers) {
+      if (u.role === "BARANGAY_USER" && u.barangay) {
+        map.set(u.barangay, u);
       }
-    });
-    return stats;
-  }, [records]);
+    }
+    return map;
+  }, [allUsers]);
 
-  const barangayRecords = useMemo(
-    () => records.filter((r) => r.barangay === selected),
-    [records, selected]
+  const assignedCount = useMemo(
+    () => BARANGAYS.filter((b) => userByBarangay.has(b)).length,
+    [userByBarangay],
   );
 
-  const stat = barangayStats[selected] || { entries: 0, farmers: 0, production: 0, area: 0 };
-
-  function openAdd() {
-    setFormMode("add");
-    setEditRecord(undefined);
-    setFormOpen(true);
+  if (!isAdminOrAbove) {
+    return (
+      <BentoCard>
+        <div className="text-center py-8">
+          <Shield size={40} className="mx-auto text-slate-300 mb-3" />
+          <p className="text-sm text-slate-500">Admin access required.</p>
+        </div>
+      </BentoCard>
+    );
   }
 
-  function openEdit(r: AgriRecord) {
-    setFormMode("edit");
-    setEditRecord(r);
-    setFormOpen(true);
+  function openReset(brgy: string) {
+    setResettingBarangay(brgy);
+    setNewPw("");
+    setConfirmPw("");
+    setError("");
   }
 
-  function openDelete(r: AgriRecord) {
-    setDeleteTarget(r);
-    setDeleteOpen(true);
+  function cancelReset() {
+    setResettingBarangay(null);
+    setNewPw("");
+    setConfirmPw("");
+    setError("");
+  }
+
+  async function handleReset(brgy: string, username: string) {
+    setError("");
+    if (!newPw || !confirmPw) { setError("Both fields are required."); return; }
+    if (newPw.length < 4) { setError("Password must be at least 4 characters."); return; }
+    if (newPw !== confirmPw) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    try {
+      const ok = await resetUserPassword(username, newPw);
+      if (ok) {
+        setSuccessBarangay(brgy);
+        cancelReset();
+        setTimeout(() => setSuccessBarangay(null), 2500);
+      } else {
+        setError("Password reset is not available right now.");
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <>
-      <div className="grid gap-5 lg:grid-cols-4">
-        {/* Left: Barangay list */}
-        <div className="lg:col-span-1 space-y-2">
-          <h2 className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
-            10 Barangays
-          </h2>
-          {BARANGAYS.map((b) => {
-            const s = barangayStats[b] || { entries: 0, farmers: 0, production: 0, area: 0 };
-            const staleInfo = staleBarangays.find((sb) => sb.name === b);
-            const isStale = staleInfo?.daysSinceUpdate !== null && staleInfo!.daysSinceUpdate! >= 7;
-            const noData = staleInfo?.daysSinceUpdate === null;
-            const isActive = selected === b;
-            return (
-              <button
-                key={b}
-                onClick={() => setSelected(b)}
-                className={`w-full rounded-[2rem] border p-3 text-left transition-all backdrop-blur-xl ${
-                  isActive
-                    ? "bg-white/70 border-emerald-500 shadow-lg shadow-emerald-100/50"
-                    : noData
-                      ? "bg-white/70 border-red-200/60"
-                      : isStale
-                        ? "bg-white/70 border-orange-200/60"
-                        : "bg-white/70 border-white/40 hover:shadow-md hover:shadow-slate-100/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <p className={`text-sm font-semibold ${isActive ? "text-emerald-700" : "text-slate-700"}`}>
-                    {b}
-                  </p>
-                  {noData && (
-                    <span className="flex items-center gap-1 rounded-[1rem] bg-red-100/80 px-2 py-0.5 text-[10px] font-black text-red-600">
-                      <AlertTriangle size={10} /> No Data
-                    </span>
-                  )}
-                  {isStale && !noData && (
-                    <span className="flex items-center gap-1 rounded-[1rem] bg-orange-100/80 px-2 py-0.5 text-[10px] font-black text-orange-500">
-                      <AlertTriangle size={10} /> Stale
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 flex gap-3 text-xs text-slate-400">
-                  <span>{s.entries} entries</span>
-                  <span>{s.farmers} farmers</span>
-                  {staleInfo?.lastUpdate && <span>last: {staleInfo.lastUpdate}</span>}
-                </div>
-              </button>
-            );
-          })}
+    <div className="fade-up delay-1 space-y-5">
+      {/* Header */}
+      <BentoCard>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Barangay Access
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {assignedCount}/{BARANGAYS.length} barangays have a portal user · admin only
+            </p>
+          </div>
+          <div className="rounded-2xl border border-amber-100/60 bg-amber-50/60 px-4 py-2 text-[11px] text-amber-800 max-w-md">
+            <p className="font-semibold flex items-center gap-1.5"><Shield size={12} /> Passwords are hashed</p>
+            <p className="text-amber-700/90">Plaintext passwords cannot be displayed. Use Reset password to set a new one and share it with the barangay user out-of-band.</p>
+          </div>
         </div>
+      </BentoCard>
 
-        {/* Right: Selected barangay detail */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Header + stats */}
-          <BentoCard noPadding>
-            <div className="px-8 pt-8 pb-4">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">{selected}</h2>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Barangay commodity data management</p>
+      {/* Barangay grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        {BARANGAYS.map((brgy) => {
+          const u = userByBarangay.get(brgy);
+          const isResetting = resettingBarangay === brgy;
+          const justSucceeded = successBarangay === brgy;
+
+          return (
+            <div
+              key={brgy}
+              className={`rounded-[2rem] bg-white/70 backdrop-blur-xl border shadow-lg p-4 transition-all ${
+                u ? "border-white/40" : "border-amber-200/60"
+              } ${isResetting ? "ring-2 ring-emerald-300" : ""}`}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <div className={`p-2 rounded-2xl ${u ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+                  <MapPin size={14} />
                 </div>
-                <div className="flex items-center gap-2">
-                  <SeedButton />
-                  <button
-                    onClick={openAdd}
-                    className="flex items-center gap-1.5 rounded-[1.5rem] bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-sm font-black text-white shadow-lg shadow-emerald-200 transition"
-                  >
-                    <Plus size={16} /> Add Entry
-                  </button>
-                </div>
+                <span className="text-sm font-bold text-slate-800 truncate flex-1">{brgy}</span>
+                {u ? (
+                  <span className="inline-flex items-center gap-1 rounded-[1rem] bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-700">
+                    <UserCheck size={10} /> Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-[1rem] bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-700">
+                    <AlertTriangle size={10} /> None
+                  </span>
+                )}
               </div>
 
-              {/* Mini KPI row */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="flex items-center gap-3 rounded-2xl bg-emerald-50/50 backdrop-blur border border-emerald-100/50 p-3">
-                  <Users size={18} className="text-emerald-600" />
-                  <div>
-                    <p className="font-mono text-lg font-bold text-emerald-700">{stat.farmers.toLocaleString()}</p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Farmers</p>
+              {u ? (
+                <>
+                  <div className="space-y-1 mb-3">
+                    <div className="rounded-xl bg-slate-50/70 border border-slate-100 px-2.5 py-1.5">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Username</p>
+                      <p className="font-mono text-xs font-bold text-slate-800 truncate">{u.username}</p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50/70 border border-slate-100 px-2.5 py-1.5">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Display name</p>
+                      <p className="text-xs text-slate-700 truncate">{u.displayName}</p>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-3 rounded-2xl bg-amber-50/50 backdrop-blur border border-amber-100/50 p-3">
-                  <Wheat size={18} className="text-amber-600" />
-                  <div>
-                    <p className="font-mono text-lg font-bold text-amber-700">{stat.production.toLocaleString()}</p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bags (40kg)</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 rounded-2xl bg-blue-50/50 backdrop-blur border border-blue-100/50 p-3">
-                  <MapPin size={18} className="text-blue-600" />
-                  <div>
-                    <p className="font-mono text-lg font-bold text-blue-700">{stat.area.toFixed(1)}</p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Hectares</p>
-                  </div>
-                </div>
-              </div>
+
+                  {justSucceeded && (
+                    <div className="mb-2 flex items-center gap-1 rounded-xl bg-emerald-50 border border-emerald-200 px-2 py-1">
+                      <CheckCircle2 size={12} className="text-emerald-600" />
+                      <span className="text-[10px] font-bold text-emerald-700">Password reset!</span>
+                    </div>
+                  )}
+
+                  {isResetting ? (
+                    <div className="space-y-2">
+                      {error && <p className="text-[10px] text-red-500">{error}</p>}
+                      <input
+                        type="password"
+                        autoFocus
+                        placeholder="New password"
+                        value={newPw}
+                        onChange={(e) => setNewPw(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200/60 bg-white/70 px-2.5 py-1.5 text-xs focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      />
+                      <input
+                        type="password"
+                        placeholder="Confirm password"
+                        value={confirmPw}
+                        onChange={(e) => setConfirmPw(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200/60 bg-white/70 px-2.5 py-1.5 text-xs focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                        onKeyDown={(e) => { if (e.key === "Enter") handleReset(brgy, u.username); }}
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => handleReset(brgy, u.username)}
+                          disabled={loading}
+                          className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-2 py-1.5 text-[11px] font-bold text-white transition disabled:opacity-50"
+                        >
+                          {loading ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          onClick={cancelReset}
+                          className="rounded-xl border border-slate-200 px-2 py-1.5 hover:bg-slate-50 transition"
+                          title="Cancel"
+                        >
+                          <X size={12} className="text-slate-500" />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => openReset(brgy)}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200/60 bg-white/70 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition"
+                    >
+                      <KeyRound size={12} /> Reset password
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  No portal user assigned. Create one in the <span className="font-semibold">Users</span> tab and set their barangay to {brgy}.
+                </p>
+              )}
             </div>
-          </BentoCard>
-
-          {/* Records table */}
-          <BentoCard noPadding>
-            <div className="px-8 pt-8 pb-4">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Commodity Records
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">{barangayRecords.length} entries for {selected}</p>
-            </div>
-
-            {barangayRecords.length === 0 ? (
-              <div className="p-10 text-center">
-                <p className="text-sm text-slate-400">No records yet for {selected}.</p>
-                <button onClick={openAdd} className="mt-3 text-sm font-black text-emerald-600 hover:underline">
-                  + Add first entry
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="bg-white/30 backdrop-blur">
-                      {["Commodity", "Variety", "Male", "Female", "Total", "Area (ha)", "Harvest", "Damage", "Pests", "Calamity type", "Event", ""].map((h) => (
-                        <th key={h} className="whitespace-nowrap px-3 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-white/30">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {barangayRecords.map((r, i) => {
-                      const totalDmg = +(r.damage_pests_hectares + r.damage_calamity_hectares).toFixed(2);
-                      return (
-                        <tr key={r.id} className={`transition-colors hover:bg-emerald-50/30 ${i % 2 === 0 ? "bg-white/40" : "bg-transparent"}`}>
-                          <td className="px-3 py-2.5 whitespace-nowrap"><CommodityBadge name={r.commodity} /></td>
-                          <td className="px-3 py-2.5 text-xs text-slate-500">{r.sub_category}</td>
-                          <td className="px-3 py-2.5 text-xs font-mono text-blue-600 text-right">{r.farmer_male}</td>
-                          <td className="px-3 py-2.5 text-xs font-mono text-pink-500 text-right">{r.farmer_female}</td>
-                          <td className="px-3 py-2.5 text-xs font-mono font-bold text-slate-700 text-right">{r.total_farmers}</td>
-                          <td className="px-3 py-2.5 text-xs font-mono text-slate-600 text-right">
-                            {r.commodity === "Fishery" ? "—" : r.planting_area_hectares}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs font-mono font-semibold text-emerald-600 text-right">
-                            {r.commodity === "Fishery" ? "—" : r.harvesting_output_bags.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs font-mono text-right">
-                            {totalDmg > 0 ? <span className="text-red-500">{totalDmg} ha</span> : <span className="text-slate-300">—</span>}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[140px]">
-                            {r.pests_diseases === "None" ? <span className="text-slate-300">—</span> : r.pests_diseases}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs whitespace-nowrap">
-                            {r.calamity_sub_category === "None" ? (
-                              <span className="text-slate-300">—</span>
-                            ) : (
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
-                                {CALAMITY_SUB_CATEGORY_LABELS[r.calamity_sub_category]}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-slate-600 max-w-[120px]">
-                            {r.calamity === "None" ? <span className="text-slate-300">—</span> : r.calamity}
-                          </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
-                            <div className="flex gap-1">
-                              <button onClick={() => openEdit(r)} className="rounded-xl p-1.5 text-slate-400 hover:bg-blue-50/50 hover:text-blue-500 transition" title="Edit">
-                                <Pencil size={13} />
-                              </button>
-                              <button onClick={() => openDelete(r)} className="rounded-xl p-1.5 text-slate-400 hover:bg-red-50/50 hover:text-red-500 transition" title="Delete">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </BentoCard>
-        </div>
+          );
+        })}
       </div>
-
-      {/* Dialogs */}
-      <RecordFormDialog open={formOpen} onClose={() => setFormOpen(false)} mode={formMode} initialData={editRecord} defaultBarangay={selected} />
-      <DeleteConfirmDialog open={deleteOpen} onClose={() => setDeleteOpen(false)} record={deleteTarget} />
-    </>
+    </div>
   );
 }

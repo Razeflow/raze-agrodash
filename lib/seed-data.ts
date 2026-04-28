@@ -102,15 +102,20 @@ export function generateFarmers(barangay: string, count: number): Farmer[] {
 // ── Generator: Records ─────────────────────────────────────────────────────────
 type CommodityType = "Rice" | "Corn" | "Fishery" | "High Value Crops" | "Industrial Crops";
 
-export function generateRecords(barangay: string, farmerPool: Farmer[]): AgriRecord[] {
-  // 15 records per barangay: 5 Rice, 3 Corn, 3 Fishery, 3 HVC, 1 Industrial
-  const plan: { commodity: CommodityType; count: number }[] = [
-    { commodity: "Rice", count: 5 },
-    { commodity: "Corn", count: 3 },
-    { commodity: "Fishery", count: 3 },
-    { commodity: "High Value Crops", count: 3 },
-    { commodity: "Industrial Crops", count: 1 },
+export function generateRecords(barangay: string, farmerPool: Farmer[], targetCount = 15): AgriRecord[] {
+  // Base mix totals 15: 5 Rice, 3 Corn, 3 Fishery, 3 HVC, 1 Industrial. Scaled to targetCount.
+  const basePlan: { commodity: CommodityType; weight: number }[] = [
+    { commodity: "Rice", weight: 5 },
+    { commodity: "Corn", weight: 3 },
+    { commodity: "Fishery", weight: 3 },
+    { commodity: "High Value Crops", weight: 3 },
+    { commodity: "Industrial Crops", weight: 1 },
   ];
+  const baseTotal = basePlan.reduce((s, p) => s + p.weight, 0);
+  const plan = basePlan.map((p) => ({
+    commodity: p.commodity,
+    count: Math.max(1, Math.round((p.weight / baseTotal) * targetCount)),
+  }));
 
   const records: AgriRecord[] = [];
   let farmerIdx = 0;
@@ -261,13 +266,17 @@ export function generateSubsidies(households: Household[]): HouseholdSubsidy[] {
 }
 
 /** Full deterministic sample: every barangay gets farmers + records (for Supabase bulk seed). */
-export function buildFullSupabaseSeed(): { farmers: Farmer[]; records: AgriRecord[] } {
+export function buildFullSupabaseSeed(
+  opts?: { farmersPerBrgy?: number; recordsPerBrgy?: number },
+): { farmers: Farmer[]; records: AgriRecord[] } {
+  const farmersPerBrgy = opts?.farmersPerBrgy ?? 15;
+  const recordsPerBrgy = opts?.recordsPerBrgy ?? 15;
   const farmers: Farmer[] = [];
   const records: AgriRecord[] = [];
   for (const brgy of BARANGAYS) {
-    const f = generateFarmers(brgy, 15);
+    const f = generateFarmers(brgy, farmersPerBrgy);
     farmers.push(...f);
-    records.push(...generateRecords(brgy, f));
+    records.push(...generateRecords(brgy, f, recordsPerBrgy));
   }
   return { farmers, records };
 }

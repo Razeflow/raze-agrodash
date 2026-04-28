@@ -94,7 +94,7 @@ async function main() {
   await deleteAll(client, "agri_records", "id");
   await deleteAll(client, "farmers", "id");
 
-  const { farmers, records } = buildFullSupabaseSeed();
+  const { farmers, records } = buildFullSupabaseSeed({ farmersPerBrgy: 30, recordsPerBrgy: 50 });
   console.log(`[seed] Inserting ${farmers.length} farmers, ${records.length} records…`);
 
   const BATCH = 80;

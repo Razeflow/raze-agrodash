@@ -12,7 +12,7 @@ const ROLE_STYLES: Record<UserRole, { label: string; bg: string; text: string }>
 };
 
 export default function UserManagement() {
-  const { allUsers, resetUserPassword, isSuperAdmin } = useAuth();
+  const { allUsers, resetUserPassword, isAdminOrAbove } = useAuth();
   const [resettingUser, setResettingUser] = useState<string | null>(null);
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
@@ -20,12 +20,12 @@ export default function UserManagement() {
   const [successUser, setSuccessUser] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  if (!isSuperAdmin) {
+  if (!isAdminOrAbove) {
     return (
       <BentoCard>
         <div className="text-center py-4">
           <Shield size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-sm text-slate-500">Super Admin access required.</p>
+          <p className="text-sm text-slate-500">Admin access required.</p>
         </div>
       </BentoCard>
     );
