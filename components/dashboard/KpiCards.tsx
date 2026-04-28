@@ -3,15 +3,35 @@ import { useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
 import StatStrip from "@/components/ui/StatStrip";
 
-export default function KpiCards({ barangayFilter }: { barangayFilter?: string }) {
+export default function KpiCards({
+  barangayFilter,
+  dateFrom,
+  dateTo,
+}: {
+  barangayFilter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
   const { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity, records, farmers } = useAgriData();
 
-  const isFiltered = barangayFilter && barangayFilter !== "All";
+  const isBarangayFiltered = !!barangayFilter && barangayFilter !== "All";
+  const isDateFiltered = !!dateFrom || !!dateTo;
+  const isFiltered = isBarangayFiltered || isDateFiltered;
 
   const stats = useMemo(() => {
     if (!isFiltered) return { totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity };
-    const fr = records.filter((r) => r.barangay === barangayFilter);
-    const ff = farmers.filter((f) => f.barangay === barangayFilter);
+
+    const fromTs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
+    const toTs = dateTo ? new Date(dateTo + "T00:00:00").getTime() + 86_400_000 : null;
+
+    const fr = records.filter((r) => {
+      if (isBarangayFiltered && r.barangay !== barangayFilter) return false;
+      const created = new Date(r.created_at).getTime();
+      if (fromTs !== null && created < fromTs) return false;
+      if (toTs !== null && created >= toTs) return false;
+      return true;
+    });
+    const ff = isBarangayFiltered ? farmers.filter((f) => f.barangay === barangayFilter) : farmers;
     const male = ff.filter((f) => f.gender === "Male").length;
     const female = ff.filter((f) => f.gender === "Female").length;
     const bags = fr.reduce((s, r) => s + r.harvesting_output_bags, 0);
@@ -29,7 +49,7 @@ export default function KpiCards({ barangayFilter }: { barangayFilter?: string }
       totalDamagedArea: dmg,
       mostProducedCommodity: top,
     };
-  }, [isFiltered, barangayFilter, records, farmers, totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity]);
+  }, [isFiltered, isBarangayFiltered, barangayFilter, dateFrom, dateTo, records, farmers, totalFarmers, totalProduction, totalPlantingArea, totalDamagedArea, mostProducedCommodity]);
 
   const items = useMemo(
     () => [

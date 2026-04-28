@@ -20,7 +20,7 @@ import ProgramsView from "@/components/dashboard/ProgramsView";
 import { BARANGAYS } from "@/lib/data";
 import {
   Sprout, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList,
-  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins,
+  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins, Calendar,
 } from "lucide-react";
 
 const TAB_DESCRIPTIONS: Record<string, string> = {
@@ -60,6 +60,8 @@ export default function Page() {
   const [pwDialogOpen, setPwDialogOpen] = useState(false);
   const [overviewBarangay, setOverviewBarangay] = useState("All");
   const [overviewSection, setOverviewSection] = useState<OverviewSection>("summary");
+  const [overviewDateFrom, setOverviewDateFrom] = useState("");
+  const [overviewDateTo, setOverviewDateTo] = useState("");
   const [shellReady, setShellReady] = useState(false);
 
   useEffect(() => {
@@ -106,18 +108,18 @@ export default function Page() {
         className={`
           fixed left-0 top-0 z-40 flex h-full flex-col
           bg-white/80 backdrop-blur-2xl border-r border-slate-200
-          p-6 overflow-hidden transition-all duration-500 ease-in-out
+          p-6 overflow-hidden
           group/sidebar
-          lg:w-24 lg:hover:w-80 lg:translate-x-0
+          lg:w-24 lg:translate-x-0
           w-80 ${menuOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
         {/* Logo */}
         <div className="flex items-center gap-4 mb-12 px-2">
-          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-700 rounded-2xl flex items-center justify-center shadow-xl shadow-emerald-200 shrink-0 transform lg:group-hover/sidebar:rotate-12 transition-all duration-500">
+          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-700 rounded-2xl flex items-center justify-center shadow-xl shadow-emerald-200 shrink-0">
             <Sprout className="text-white w-7 h-7" />
           </div>
-          <div className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-500 whitespace-nowrap">
+          <div className="lg:hidden whitespace-nowrap">
             <h1 className="font-black text-2xl tracking-tighter text-slate-950 leading-none">AgriData</h1>
             <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-600 font-black mt-1">Municipality of Tubo</p>
           </div>
@@ -136,13 +138,13 @@ export default function Page() {
                 }`}
               >
                 <t.icon className={`w-6 h-6 shrink-0 ${tab === t.id ? "text-emerald-400" : "group-hover/item:text-emerald-500 transition-colors"}`} />
-                <span className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 whitespace-nowrap">
+                <span className="lg:hidden whitespace-nowrap">
                   {t.label}
                 </span>
               </button>
 
               {/* Floating tooltip when collapsed */}
-              <div className="absolute left-full ml-6 opacity-0 translate-x-4 pointer-events-none group-hover/item:opacity-100 group-hover/item:translate-x-0 transition-all duration-300 z-[60] hidden lg:block lg:group-hover/sidebar:hidden">
+              <div className="absolute left-full ml-6 opacity-0 translate-x-4 pointer-events-none group-hover/item:opacity-100 group-hover/item:translate-x-0 transition-all duration-300 z-[60] hidden lg:block">
                 <div className="bg-slate-900 text-white p-4 rounded-3xl shadow-2xl w-56 border border-white/10 backdrop-blur-xl">
                   <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">{t.label}</p>
                   <p className="text-xs font-medium text-slate-300 leading-relaxed">{TAB_DESCRIPTIONS[t.id] || ""}</p>
@@ -159,7 +161,7 @@ export default function Page() {
         {/* Profile */}
         <div className="mt-auto">
           {/* Desktop collapsed rail: icon-only (always visible without hover) */}
-          <div className="mb-3 hidden flex-col items-center gap-2 lg:flex lg:group-hover/sidebar:hidden">
+          <div className="mb-3 hidden flex-col items-center gap-2 lg:flex">
             <button
               type="button"
               onClick={() => setPwDialogOpen(true)}
@@ -181,7 +183,7 @@ export default function Page() {
           </div>
 
           {/* Mobile + desktop expanded: full label buttons */}
-          <div className="mb-3 flex flex-col gap-2 lg:hidden lg:group-hover/sidebar:flex">
+          <div className="mb-3 flex flex-col gap-2 lg:hidden">
             <button
               type="button"
               onClick={() => setPwDialogOpen(true)}
@@ -198,11 +200,11 @@ export default function Page() {
             </button>
           </div>
 
-          <div className="flex items-center gap-4 px-2 py-4 rounded-3xl lg:group-hover/sidebar:bg-slate-50 transition-colors duration-300">
+          <div className="flex items-center gap-4 px-2 py-4 rounded-3xl">
             <div className="w-12 h-12 rounded-2xl bg-slate-200 border-4 border-white shadow-sm flex items-center justify-center font-black text-slate-600 shrink-0 text-sm">
               {initials}
             </div>
-            <div className="flex-1 lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 overflow-hidden text-left">
+            <div className="flex-1 lg:hidden overflow-hidden text-left">
               <p className="font-black text-sm truncate text-slate-900 tracking-tight">{user?.displayName}</p>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{roleBadge}</p>
             </div>
@@ -219,7 +221,7 @@ export default function Page() {
       )}
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className="lg:pl-24 transition-all duration-500">
+      <div className="lg:pl-24">
         {/* Hero Header */}
         <header className="px-10 pt-10 pb-6">
           <div className="flex justify-between items-end gap-4 flex-wrap">
@@ -272,7 +274,37 @@ export default function Page() {
           <div key={tab} className="space-y-8 tab-pane-enter">
             {tab === "overview" && (
               <>
-                <KpiCards barangayFilter={overviewBarangay} />
+                <div className="flex items-center gap-2 h-8 rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur px-3 w-fit">
+                  <Calendar size={12} className="text-emerald-600 shrink-0" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 shrink-0">Date</span>
+                  <input
+                    type="date"
+                    aria-label="Created on or after"
+                    value={overviewDateFrom}
+                    max={overviewDateTo || undefined}
+                    onChange={(e) => setOverviewDateFrom(e.target.value)}
+                    className="bg-transparent text-xs text-slate-700 outline-none w-[110px] [color-scheme:light]"
+                  />
+                  <span className="text-slate-300 shrink-0">→</span>
+                  <input
+                    type="date"
+                    aria-label="Created on or before"
+                    value={overviewDateTo}
+                    min={overviewDateFrom || undefined}
+                    onChange={(e) => setOverviewDateTo(e.target.value)}
+                    className="bg-transparent text-xs text-slate-700 outline-none w-[110px] [color-scheme:light]"
+                  />
+                  {(overviewDateFrom || overviewDateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => { setOverviewDateFrom(""); setOverviewDateTo(""); }}
+                      className="ml-1 rounded-[1rem] bg-emerald-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-200"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <KpiCards barangayFilter={overviewBarangay} dateFrom={overviewDateFrom} dateTo={overviewDateTo} />
                 <div className="flex flex-wrap gap-2">
                   {OVERVIEW_SECTION_TABS.filter((s) => !s.adminOnly || isAdminOrAbove).map((s) => (
                     <button
@@ -289,16 +321,16 @@ export default function Page() {
                     </button>
                   ))}
                 </div>
-                {overviewSection === "summary" && <FindingMatrix barangayFilter={overviewBarangay} />}
+                {overviewSection === "summary" && <FindingMatrix barangayFilter={overviewBarangay} dateFrom={overviewDateFrom} dateTo={overviewDateTo} />}
                 {overviewSection === "trends" && (
                   <div className="space-y-8">
-                    <CommodityAnalytics barangayFilter={overviewBarangay} />
-                    <SubCategoryAnalytics barangayFilter={overviewBarangay} />
+                    <CommodityAnalytics barangayFilter={overviewBarangay} dateFrom={overviewDateFrom} dateTo={overviewDateTo} />
+                    <SubCategoryAnalytics barangayFilter={overviewBarangay} dateFrom={overviewDateFrom} dateTo={overviewDateTo} />
                   </div>
                 )}
-                {overviewSection === "activity" && <DailySummaryCalendar barangayFilter={overviewBarangay} />}
+                {overviewSection === "activity" && <DailySummaryCalendar barangayFilter={overviewBarangay} dateFrom={overviewDateFrom} dateTo={overviewDateTo} />}
                 {overviewSection === "rankings" && isAdminOrAbove && (
-                  <BarangayLeaderboard barangayFilter={overviewBarangay} />
+                  <BarangayLeaderboard barangayFilter={overviewBarangay} dateFrom={overviewDateFrom} dateTo={overviewDateTo} />
                 )}
               </>
             )}

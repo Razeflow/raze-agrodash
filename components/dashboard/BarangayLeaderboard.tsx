@@ -34,18 +34,35 @@ function sortMetric(row: Row, key: SortKey): number {
   }
 }
 
-export default function BarangayLeaderboard({ barangayFilter }: { barangayFilter?: string }) {
+export default function BarangayLeaderboard({
+  barangayFilter,
+  dateFrom,
+  dateTo,
+}: {
+  barangayFilter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
   const { records } = useAgriData();
   const [sortBy, setSortBy] = useState<SortKey>("production");
 
   const rowsUnsorted = useMemo(() => {
+    const fromTs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
+    const toTs = dateTo ? new Date(dateTo + "T00:00:00").getTime() + 86_400_000 : null;
+    const dateFilteredRecords = records.filter((r) => {
+      const created = new Date(r.created_at).getTime();
+      if (fromTs !== null && created < fromTs) return false;
+      if (toTs !== null && created >= toTs) return false;
+      return true;
+    });
+
     const stats: Record<string, Omit<Row, "name" | "commodityTypes">> = {};
     const commoditiesByBrgy: Record<string, Set<string>> = {};
     BARANGAYS.forEach((b) => {
       stats[b] = { entries: 0, farmers: 0, production: 0, area: 0, calamityHa: 0 };
       commoditiesByBrgy[b] = new Set();
     });
-    records.forEach((r) => {
+    dateFilteredRecords.forEach((r) => {
       if (!stats[r.barangay]) return;
       stats[r.barangay].entries++;
       stats[r.barangay].farmers += r.total_farmers;
@@ -59,7 +76,7 @@ export default function BarangayLeaderboard({ barangayFilter }: { barangayFilter
       ...stats[name],
       commodityTypes: commoditiesByBrgy[name].size,
     }));
-  }, [records]);
+  }, [records, dateFrom, dateTo]);
 
   const data = useMemo(
     () => [...rowsUnsorted].sort((a, b) => sortMetric(b, sortBy) - sortMetric(a, sortBy)),
@@ -67,6 +84,7 @@ export default function BarangayLeaderboard({ barangayFilter }: { barangayFilter
   );
 
   const insights = useMemo(() => {
+    const hasAnyRows = rowsUnsorted.some((r) => r.entries > 0);
     if (rowsUnsorted.length === 0) {
       return {
         topCalamity: null as Row | null,
@@ -74,7 +92,7 @@ export default function BarangayLeaderboard({ barangayFilter }: { barangayFilter
         topProduction: null as Row | null,
         allCalamityZero: true,
         allCommodityTypesZero: true,
-        noRecords: records.length === 0,
+        noRecords: !hasAnyRows,
       };
     }
     const topCalamity = rowsUnsorted.reduce((best, r) => (r.calamityHa > best.calamityHa ? r : best));
@@ -92,9 +110,9 @@ export default function BarangayLeaderboard({ barangayFilter }: { barangayFilter
       topProduction,
       allCalamityZero,
       allCommodityTypesZero,
-      noRecords: records.length === 0,
+      noRecords: !hasAnyRows,
     };
-  }, [rowsUnsorted, records.length]);
+  }, [rowsUnsorted]);
 
   const maxVal = useMemo(() => {
     const m = Math.max(...data.map((r) => sortMetric(r, sortBy)), 0);

@@ -23,7 +23,15 @@ type MatrixRow = {
   total: number;
 };
 
-export default function FindingMatrix({ barangayFilter }: { barangayFilter?: string }) {
+export default function FindingMatrix({
+  barangayFilter,
+  dateFrom,
+  dateTo,
+}: {
+  barangayFilter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
   const { records } = useAgriData();
   const [detailCommodity, setDetailCommodity] = useState<string | null>(null);
 
@@ -31,7 +39,15 @@ export default function FindingMatrix({ barangayFilter }: { barangayFilter?: str
 
   // Compute matrix data: for each commodity, count barangays by status
   const { matrixRows, totals, breakdowns } = useMemo(() => {
-    const filtered = isFiltered ? records.filter((r) => r.barangay === barangayFilter) : records;
+    const fromTs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
+    const toTs = dateTo ? new Date(dateTo + "T00:00:00").getTime() + 86_400_000 : null;
+    const filtered = records.filter((r) => {
+      if (isFiltered && r.barangay !== barangayFilter) return false;
+      const created = new Date(r.created_at).getTime();
+      if (fromTs !== null && created < fromTs) return false;
+      if (toTs !== null && created >= toTs) return false;
+      return true;
+    });
     const barangayList = isFiltered ? [barangayFilter!] : [...BARANGAYS];
 
     const rows: MatrixRow[] = COMMODITY_OPTIONS.map((commodity) => {
@@ -97,7 +113,7 @@ export default function FindingMatrix({ barangayFilter }: { barangayFilter?: str
     });
 
     return { matrixRows: rows, totals: tots, breakdowns: brk };
-  }, [records, isFiltered, barangayFilter]);
+  }, [records, isFiltered, barangayFilter, dateFrom, dateTo]);
 
   // Find the max count for scaling bars
   const maxCount = useMemo(() => {

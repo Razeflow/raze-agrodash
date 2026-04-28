@@ -47,18 +47,31 @@ function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-export default function DailySummaryCalendar({ barangayFilter }: { barangayFilter?: string }) {
+export default function DailySummaryCalendar({
+  barangayFilter,
+  dateFrom,
+  dateTo,
+}: {
+  barangayFilter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
   const { recordsByDate } = useAgriData();
-  const isFiltered = barangayFilter && barangayFilter !== "All";
+  const isBarangayFiltered = !!barangayFilter && barangayFilter !== "All";
+  const isDateFiltered = !!dateFrom || !!dateTo;
+  const isFiltered = isBarangayFiltered || isDateFiltered;
   const filteredByDate = useMemo(() => {
     if (!isFiltered) return recordsByDate;
     const result: Record<string, AgriRecord[]> = {};
     for (const [date, recs] of Object.entries(recordsByDate)) {
-      const filtered = recs.filter((r) => r.barangay === barangayFilter);
+      // Drop dates outside the [dateFrom, dateTo] window (date keys are YYYY-MM-DD strings).
+      if (dateFrom && date < dateFrom) continue;
+      if (dateTo && date > dateTo) continue;
+      const filtered = isBarangayFiltered ? recs.filter((r) => r.barangay === barangayFilter) : recs;
       if (filtered.length > 0) result[date] = filtered;
     }
     return result;
-  }, [recordsByDate, isFiltered, barangayFilter]);
+  }, [recordsByDate, isFiltered, isBarangayFiltered, barangayFilter, dateFrom, dateTo]);
   const { isBarangayUser, userBarangay } = useAuth();
 
   const today = new Date();

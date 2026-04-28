@@ -19,10 +19,28 @@ const tooltipStyle = {
 
 const COMMODITIES = ["Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"] as const;
 
-export default function SubCategoryAnalytics({ barangayFilter }: { barangayFilter?: string }) {
+export default function SubCategoryAnalytics({
+  barangayFilter,
+  dateFrom,
+  dateTo,
+}: {
+  barangayFilter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
   const { records: allRecords } = useAgriData();
-  const isFiltered = barangayFilter && barangayFilter !== "All";
-  const records = useMemo(() => isFiltered ? allRecords.filter((r) => r.barangay === barangayFilter) : allRecords, [allRecords, isFiltered, barangayFilter]);
+  const isBarangayFiltered = !!barangayFilter && barangayFilter !== "All";
+  const records = useMemo(() => {
+    const fromTs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
+    const toTs = dateTo ? new Date(dateTo + "T00:00:00").getTime() + 86_400_000 : null;
+    return allRecords.filter((r) => {
+      if (isBarangayFiltered && r.barangay !== barangayFilter) return false;
+      const created = new Date(r.created_at).getTime();
+      if (fromTs !== null && created < fromTs) return false;
+      if (toTs !== null && created >= toTs) return false;
+      return true;
+    });
+  }, [allRecords, isBarangayFiltered, barangayFilter, dateFrom, dateTo]);
   const [active, setActive] = useState<string>("Rice");
   const color = COMMODITY_COLORS[active];
 

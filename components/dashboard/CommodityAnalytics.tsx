@@ -56,16 +56,36 @@ const renderCustomLabel = (props: PieLabelRenderProps) => {
   ) : null;
 };
 
-export default function CommodityAnalytics({ barangayFilter }: { barangayFilter?: string }) {
+export default function CommodityAnalytics({
+  barangayFilter,
+  dateFrom,
+  dateTo,
+}: {
+  barangayFilter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
   const { productionByCommodity, records } = useAgriData();
-  const isFiltered = barangayFilter && barangayFilter !== "All";
+  const isBarangayFiltered = !!barangayFilter && barangayFilter !== "All";
+  const isDateFiltered = !!dateFrom || !!dateTo;
+  const isFiltered = isBarangayFiltered || isDateFiltered;
 
   const data = isFiltered
     ? (() => {
+        const fromTs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
+        const toTs = dateTo ? new Date(dateTo + "T00:00:00").getTime() + 86_400_000 : null;
         const t: Record<string, number> = {};
-        records.filter((r) => r.barangay === barangayFilter).forEach((r) => {
-          t[r.commodity] = (t[r.commodity] || 0) + r.harvesting_output_bags;
-        });
+        records
+          .filter((r) => {
+            if (isBarangayFiltered && r.barangay !== barangayFilter) return false;
+            const created = new Date(r.created_at).getTime();
+            if (fromTs !== null && created < fromTs) return false;
+            if (toTs !== null && created >= toTs) return false;
+            return true;
+          })
+          .forEach((r) => {
+            t[r.commodity] = (t[r.commodity] || 0) + r.harvesting_output_bags;
+          });
         return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
       })()
     : productionByCommodity;
