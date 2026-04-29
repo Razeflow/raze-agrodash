@@ -108,18 +108,18 @@ export default function Page() {
         className={`
           fixed left-0 top-0 z-40 flex h-full flex-col
           bg-white/80 backdrop-blur-2xl border-r border-slate-200
-          p-6 overflow-hidden
+          p-6 overflow-hidden transition-all duration-500 ease-in-out
           group/sidebar
-          lg:w-80 lg:translate-x-0
+          lg:w-24 lg:hover:w-80 lg:translate-x-0
           w-80 ${menuOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
         {/* Logo */}
         <div className="flex items-center gap-4 mb-12 px-2">
-          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-700 rounded-2xl flex items-center justify-center shadow-xl shadow-emerald-200 shrink-0">
+          <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-700 rounded-2xl flex items-center justify-center shadow-xl shadow-emerald-200 shrink-0 transform lg:group-hover/sidebar:rotate-12 transition-all duration-500">
             <Sprout className="text-white w-7 h-7" />
           </div>
-          <div className="whitespace-nowrap">
+          <div className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-500 whitespace-nowrap">
             <h1 className="font-black text-2xl tracking-tighter text-slate-950 leading-none">AgriData</h1>
             <p className="text-[10px] uppercase tracking-[0.2em] text-emerald-600 font-black mt-1">Municipality of Tubo</p>
           </div>
@@ -138,13 +138,13 @@ export default function Page() {
                 }`}
               >
                 <t.icon className={`w-6 h-6 shrink-0 ${tab === t.id ? "text-emerald-400" : "group-hover/item:text-emerald-500 transition-colors"}`} />
-                <span className="whitespace-nowrap">
+                <span className="lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 whitespace-nowrap">
                   {t.label}
                 </span>
               </button>
 
               {/* Floating tooltip when collapsed */}
-              <div className="absolute left-full ml-6 opacity-0 translate-x-4 pointer-events-none group-hover/item:opacity-100 group-hover/item:translate-x-0 transition-all duration-300 z-[60] hidden">
+              <div className="absolute left-full ml-6 opacity-0 translate-x-4 pointer-events-none group-hover/item:opacity-100 group-hover/item:translate-x-0 transition-all duration-300 z-[60] hidden lg:block lg:group-hover/sidebar:hidden">
                 <div className="bg-slate-900 text-white p-4 rounded-3xl shadow-2xl w-56 border border-white/10 backdrop-blur-xl">
                   <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">{t.label}</p>
                   <p className="text-xs font-medium text-slate-300 leading-relaxed">{TAB_DESCRIPTIONS[t.id] || ""}</p>
@@ -161,7 +161,7 @@ export default function Page() {
         {/* Profile */}
         <div className="mt-auto">
           {/* Desktop collapsed rail: icon-only (always visible without hover) */}
-          <div className="mb-3 hidden flex-col items-center gap-2">
+          <div className="mb-3 hidden flex-col items-center gap-2 lg:flex lg:group-hover/sidebar:hidden">
             <button
               type="button"
               onClick={() => setPwDialogOpen(true)}
@@ -183,7 +183,7 @@ export default function Page() {
           </div>
 
           {/* Mobile + desktop expanded: full label buttons */}
-          <div className="mb-3 flex flex-col gap-2">
+          <div className="mb-3 flex flex-col gap-2 lg:hidden lg:group-hover/sidebar:flex">
             <button
               type="button"
               onClick={() => setPwDialogOpen(true)}
@@ -200,11 +200,11 @@ export default function Page() {
             </button>
           </div>
 
-          <div className="flex items-center gap-4 px-2 py-4 rounded-3xl">
+          <div className="flex items-center gap-4 px-2 py-4 rounded-3xl lg:group-hover/sidebar:bg-slate-50 transition-colors duration-300">
             <div className="w-12 h-12 rounded-2xl bg-slate-200 border-4 border-white shadow-sm flex items-center justify-center font-black text-slate-600 shrink-0 text-sm">
               {initials}
             </div>
-            <div className="flex-1 overflow-hidden text-left">
+            <div className="flex-1 lg:opacity-0 lg:group-hover/sidebar:opacity-100 transition-opacity duration-300 overflow-hidden text-left">
               <p className="font-black text-sm truncate text-slate-900 tracking-tight">{user?.displayName}</p>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{roleBadge}</p>
             </div>
@@ -221,7 +221,7 @@ export default function Page() {
       )}
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
-      <div className="lg:pl-80">
+      <div className="lg:pl-24 transition-all duration-500">
         {/* Hero Header */}
         <header className="px-10 pt-10 pb-6">
           <div className="flex justify-between items-end gap-4 flex-wrap">
