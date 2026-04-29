@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgriData — Feature Overview</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: #1e293b;
+      background: #fff;
+      padding: 48px 56px;
+      max-width: 900px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      border-bottom: 2.5px solid #0f172a;
+      padding-bottom: 18px;
+      margin-bottom: 28px;
+    }
+    .header-left h1 {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      color: #0f172a;
+    }
+    .header-left p {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: #10b981;
+      margin-top: 3px;
+    }
+    .header-right {
+      text-align: right;
+      font-size: 11px;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+
+    /* ── Section headings ── */
+    h2 {
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      color: #10b981;
+      margin: 28px 0 12px;
+    }
+    h3 {
+      font-size: 13px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+
+    /* ── Feature cards grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .card {
+      border: 1.5px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .card .tag {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      padding: 2px 8px;
+      border-radius: 99px;
+      margin-bottom: 6px;
+    }
+    .tag-admin   { background: #fef3c7; color: #92400e; }
+    .tag-all     { background: #dcfce7; color: #166534; }
+    .tag-barangay{ background: #dbeafe; color: #1e40af; }
+    .card ul {
+      margin: 6px 0 0 14px;
+      color: #475569;
+      font-size: 12px;
+    }
+    .card ul li { margin-bottom: 2px; }
+
+    /* ── Connection flow ── */
+    .flow {
+      margin-top: 10px;
+    }
+    .flow-row {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      margin-bottom: 6px;
+    }
+    .flow-node {
+      flex: 1;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #1e293b;
+      position: relative;
+    }
+    .flow-node span {
+      display: block;
+      font-size: 9px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 2px;
+    }
+    .flow-arrow {
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      color: #cbd5e1;
+      font-size: 16px;
+      font-weight: 300;
+    }
+    .flow-node.green  { border-color: #bbf7d0; background: #f0fdf4; }
+    .flow-node.blue   { border-color: #bfdbfe; background: #eff6ff; }
+    .flow-node.amber  { border-color: #fde68a; background: #fffbeb; }
+    .flow-node.slate  { border-color: #e2e8f0; background: #f8fafc; }
+    .flow-node.violet { border-color: #ddd6fe; background: #f5f3ff; }
+
+    /* ── Roles table ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    th {
+      background: #0f172a;
+      color: #fff;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      padding: 8px 12px;
+      text-align: left;
+      font-weight: 800;
+    }
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      color: #475569;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    td strong { color: #0f172a; font-weight: 700; }
+    .check { color: #10b981; font-weight: 900; }
+    .cross { color: #e2e8f0; }
+
+    /* ── Tech stack ── */
+    .stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 8px;
+    }
+    .pill {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 99px;
+      border: 1.5px solid #e2e8f0;
+      color: #475569;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 36px;
+      padding-top: 14px;
+      border-top: 1.5px solid #e2e8f0;
+      font-size: 10px;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    @media print {
+      body { padding: 32px 40px; }
+      .card, .flow-node { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>AgriData Dashboard</h1>
+      <p>Municipality of Tubo · Feature Overview</p>
+    </div>
+    <div class="header-right">
+      Version 1.0<br>
+      github.com/Razeflow/raze-agrodash
+    </div>
+  </div>
+
+  <!-- What it is -->
+  <h2>What It Is</h2>
+  <p style="color:#475569; font-size:12.5px; max-width:780px;">
+    A real-time agricultural monitoring portal for the Municipality of Tubo. It lets barangay encoders submit farming records, while municipal admins see live analytics — commodity production, farmer counts, damage reports, program benefits, and barangay performance rankings — all in one dashboard.
+  </p>
+
+  <!-- Features -->
+  <h2>Modules &amp; Features</h2>
+  <div class="grid">
+
+    <div class="card">
+      <div class="tag tag-all">All Users</div>
+      <h3>Overview</h3>
+      <ul>
+        <li>KPI cards — total farmers, production, planting area, damage, top commodity</li>
+        <li>Finding Matrix — commodity status per barangay (Productive / At Risk / Damaged / No Activity)</li>
+        <li>Commodity Analytics — bar chart + pie chart of production by commodity</li>
+        <li>Sub-Category Breakdown — variety-level production per commodity</li>
+        <li>Daily Summary Calendar — monthly / weekly / daily views of record activity</li>
+        <li>Barangay Leaderboard — ranked by production, farmers, area, or calamity damage <em>(admin only)</em></li>
+        <li>Date range filter + barangay filter applied across all sections</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-all">All Users</div>
+      <h3>Damage &amp; Risk Monitoring</h3>
+      <ul>
+        <li>Weather alert feed and loss data</li>
+        <li>Calamity damage and pest damage tracking by hectare</li>
+        <li>Risk classification per barangay and commodity</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-all">All Users</div>
+      <h3>Farmers</h3>
+      <ul>
+        <li>Full municipal farmer database</li>
+        <li>Farmer profiles — name, gender, barangay, contact</li>
+        <li>Add / Edit / Delete farmers</li>
+        <li>Barangay and gender distribution charts</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-all">All Users</div>
+      <h3>Records</h3>
+      <ul>
+        <li>Production log per commodity and sub-category</li>
+        <li>Compact card layout with quick stats per record</li>
+        <li>Filters: search, commodity, barangay, period (month/year), date range</li>
+        <li>Add / Edit / Delete records</li>
+        <li>Fishery records support separate harvest fields</li>
+        <li>Analytics panel — record count, top commodity, total planting area</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-all">All Users</div>
+      <h3>Programs</h3>
+      <ul>
+        <li>RFFA (Registry of Fisherfolk and Farmers) tracking</li>
+        <li>Subsidy and benefit distribution records</li>
+        <li>Farmer organization membership</li>
+        <li>Government program enrollment per barangay</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-admin">Admin Only</div>
+      <h3>Management</h3>
+      <ul>
+        <li>Barangay portal user credentials grid</li>
+        <li>Shows username + active/unassigned status per barangay</li>
+        <li>Inline password reset for any barangay user</li>
+        <li>Passwords are hashed — plaintext never displayed</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-admin">Admin Only</div>
+      <h3>Users</h3>
+      <ul>
+        <li>Full admin role management</li>
+        <li>Create / edit / delete admin and barangay accounts</li>
+        <li>Assign roles: Super Admin, Admin, Barangay User</li>
+        <li>Assign barangay to each user account</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="tag tag-all">All Users</div>
+      <h3>Export &amp; Account</h3>
+      <ul>
+        <li>Export button — downloads filtered records as CSV/Excel</li>
+        <li>Change password dialog (available to all roles)</li>
+        <li>Session-based login with role auto-redirect</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- How they connect -->
+  <h2>How the Modules Connect</h2>
+  <div class="flow">
+
+    <div class="flow-row">
+      <div class="flow-node blue"><span>Input</span>Farmers tab<br><small style="font-weight:500;color:#64748b;">Farmer profiles stored in DB</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node blue"><span>Input</span>Records tab<br><small style="font-weight:500;color:#64748b;">Production entries linked to farmers &amp; barangay</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node green"><span>Output</span>Overview tab<br><small style="font-weight:500;color:#64748b;">Live KPIs, charts, matrix &amp; calendar</small></div>
+    </div>
+
+    <div class="flow-row">
+      <div class="flow-node blue"><span>Input</span>Records (damage fields)<br><small style="font-weight:500;color:#64748b;">Pests ha + Calamity ha per record</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node amber"><span>Output</span>Damage &amp; Risk<br><small style="font-weight:500;color:#64748b;">Aggregated risk view by barangay</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node green"><span>Overview</span>Finding Matrix<br><small style="font-weight:500;color:#64748b;">Status: Productive / At Risk / Damaged</small></div>
+    </div>
+
+    <div class="flow-row">
+      <div class="flow-node blue"><span>Input</span>Farmers tab<br><small style="font-weight:500;color:#64748b;">Farmer IDs and barangay</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node violet"><span>Input</span>Programs tab<br><small style="font-weight:500;color:#64748b;">RFFA, subsidies, org membership</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node slate"><span>Reference</span>Program reports<br><small style="font-weight:500;color:#64748b;">Who received what benefit</small></div>
+    </div>
+
+    <div class="flow-row">
+      <div class="flow-node slate"><span>Admin Setup</span>Users tab<br><small style="font-weight:500;color:#64748b;">Create barangay user accounts</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node slate"><span>Admin Setup</span>Management tab<br><small style="font-weight:500;color:#64748b;">Reset passwords, verify active status</small></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node blue"><span>Encoder Access</span>Barangay User login<br><small style="font-weight:500;color:#64748b;">Locked to own barangay, adds records &amp; farmers</small></div>
+    </div>
+
+  </div>
+
+  <!-- Roles -->
+  <h2>Role Access Matrix</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Module</th>
+        <th>Barangay User</th>
+        <th>Admin</th>
+        <th>Super Admin</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Overview</strong> (KPIs, charts, calendar)</td><td class="check">✓ own barangay</td><td class="check">✓ all + leaderboard</td><td class="check">✓ all</td></tr>
+      <tr><td><strong>Damage &amp; Risk</strong></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+      <tr><td><strong>Farmers</strong></td><td class="check">✓ own barangay</td><td class="check">✓ all</td><td class="check">✓ all</td></tr>
+      <tr><td><strong>Records</strong></td><td class="check">✓ own barangay</td><td class="check">✓ all</td><td class="check">✓ all</td></tr>
+      <tr><td><strong>Programs</strong></td><td class="check">✓</td><td class="check">✓</td><td class="check">✓</td></tr>
+      <tr><td><strong>Management</strong> (barangay credentials)</td><td class="cross">✗</td><td class="check">✓</td><td class="check">✓</td></tr>
+      <tr><td><strong>Users</strong> (admin accounts)</td><td class="cross">✗</td><td class="check">✓</td><td class="check">✓</td></tr>
+      <tr><td><strong>Export</strong></td><td class="cross">✗</td><td class="check">✓</td><td class="check">✓</td></tr>
+      <tr><td><strong>Barangay filter</strong> (header)</td><td class="cross">✗ auto-locked</td><td class="check">✓</td><td class="check">✓</td></tr>
+    </tbody>
+  </table>
+
+  <!-- Tech stack -->
+  <h2>Tech Stack</h2>
+  <div class="stack">
+    <span class="pill">Next.js 16 (App Router)</span>
+    <span class="pill">React 19</span>
+    <span class="pill">TypeScript</span>
+    <span class="pill">Tailwind CSS v4</span>
+    <span class="pill">Supabase (PostgreSQL)</span>
+    <span class="pill">Supabase Auth</span>
+    <span class="pill">Row-Level Security</span>
+    <span class="pill">Recharts</span>
+    <span class="pill">Lucide Icons</span>
+    <span class="pill">Vercel (hosting)</span>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span>AgriData · Municipality of Tubo · Confidential</span>
+    <span>To save as PDF: File → Print → Save as PDF</span>
+  </div>
+
+</body>
+</html>
