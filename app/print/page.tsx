@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Printer, Sprout } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import KpiCards from "@/components/dashboard/KpiCards";
@@ -23,7 +23,22 @@ import BarangayLeaderboard from "@/components/dashboard/BarangayLeaderboard";
  */
 function PrintReportInner() {
   const params = useSearchParams();
-  const { isAdminOrAbove } = useAuth();
+  const router = useRouter();
+  const { isAdminOrAbove, isLoggedIn } = useAuth();
+
+  // Auth guard: a direct-link visit while logged out shouldn't render
+  // empty data — bounce back to the dashboard, which handles login.
+  useEffect(() => {
+    if (!isLoggedIn) router.replace("/");
+  }, [isLoggedIn, router]);
+
+  if (!isLoggedIn) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
+        Redirecting…
+      </div>
+    );
+  }
 
   const barangay = params.get("barangay") || "All";
   const from = params.get("from") || "";
