@@ -9,14 +9,20 @@ import { recordFormSchema, farmerFormSchema } from "../lib/validations";
 let pass = 0;
 let fail = 0;
 
-function check(name: string, expectFail: boolean, result: { success: boolean; error?: { issues: { path: (string | number)[]; message: string }[] } }) {
+type SafeParseLike = {
+  success: boolean;
+  error?: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }> };
+};
+
+function check(name: string, expectFail: boolean, result: SafeParseLike) {
   const ok = expectFail ? !result.success : result.success;
   if (ok) {
     pass++;
     console.log(`  PASS  ${name}`);
     if (expectFail && !result.success && result.error) {
       const first = result.error.issues[0];
-      console.log(`        └─ "${first.path.join(".")}": ${first.message}`);
+      const pathStr = first.path.map((p) => String(p)).join(".");
+      console.log(`        └─ "${pathStr}": ${first.message}`);
     }
   } else {
     fail++;

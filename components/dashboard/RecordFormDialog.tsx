@@ -196,8 +196,8 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     }
   }
 
-  const inputCls = "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
-  const inputErrCls = "w-full rounded-[1.5rem] border border-red-300 bg-red-50/30 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-100 transition";
+  const inputCls = "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2.5 sm:py-2 text-base sm:text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
+  const inputErrCls = "w-full rounded-[1.5rem] border border-red-300 bg-red-50/30 backdrop-blur px-3 py-2.5 sm:py-2 text-base sm:text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-100 transition";
   const labelCls = "block text-xs font-black uppercase tracking-widest text-slate-500 mb-1";
   const errTextCls = "text-[11px] text-red-500 mt-1 flex items-center gap-1";
 
@@ -207,7 +207,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
         <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
         <div className="flex min-h-full items-center justify-center p-4">
-        <div className={`relative z-10 w-full max-w-2xl rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
+        <div className={`relative z-10 w-full max-w-2xl rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 max-h-[92vh] overflow-y-auto p-5 sm:p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
           <div className="mb-5 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-800">
               {mode === "add" ? "Add New Record" : "Edit Record"}
@@ -238,7 +238,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Reporting Period */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Reporting Month <span className="text-red-400">*</span></label>
                 <select
@@ -263,7 +263,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             </div>
 
             {/* Barangay + Commodity */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Barangay <span className="text-red-400">*</span></label>
                 {isBarangayUser ? (
@@ -331,7 +331,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             {/* Crop fields (hidden for Fishery) */}
             {!isFishery && (
               <>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className={labelCls}>Planting Area (hectares)</label>
                     <input
@@ -359,7 +359,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                     {errors.harvesting_output_bags && <p className={errTextCls}><AlertCircle size={11} /> {errors.harvesting_output_bags}</p>}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className={labelCls}>Damage -- Pests & Diseases (ha)</label>
                     <input
@@ -392,7 +392,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
             {/* Fishery fields */}
             {isFishery && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={labelCls}>Stocking</label>
                   <input
@@ -423,7 +423,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             )}
 
             {/* Pests & Calamity */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Pests & Diseases</label>
                 <input className={inputCls} value={form.pests_diseases} onChange={(e) => setForm((f) => ({ ...f, pests_diseases: e.target.value }))} placeholder="e.g. Rice Blast, Stem Borer or None" />
@@ -442,7 +442,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                   ))}
                 </select>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className={labelCls}>Calamity event or name</label>
                 <input
                   className={errors.calamity ? inputErrCls : inputCls}
@@ -461,9 +461,9 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             </div>
 
             {/* Actions */}
-            <div className="flex justify-end gap-3 pt-2">
-              <button type="button" onClick={onClose} className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition">{mode === "add" ? "Close" : "Cancel"}</button>
-              <button type="submit" disabled={saving} className={`rounded-[1.5rem] px-5 py-2 text-sm font-black text-white shadow-lg transition ${saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"}`}>
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
+              <button type="button" onClick={onClose} className="w-full sm:w-auto rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-white/70 transition">{mode === "add" ? "Close" : "Cancel"}</button>
+              <button type="submit" disabled={saving} className={`w-full sm:w-auto rounded-[1.5rem] px-5 py-2.5 sm:py-2 text-sm font-black text-white shadow-lg transition ${saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"}`}>
                 {saving ? "Saving…" : mode === "add" ? "Add Record" : "Save Changes"}
               </button>
             </div>

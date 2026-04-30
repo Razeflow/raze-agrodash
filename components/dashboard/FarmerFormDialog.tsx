@@ -239,9 +239,9 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
   const previewSrc = photoFile ? URL.createObjectURL(photoFile) : photoUrl;
 
   const inputCls =
-    "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
+    "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2.5 sm:py-2 text-base sm:text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
   const inputErrCls =
-    "w-full rounded-[1.5rem] border border-red-300 bg-red-50/30 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-100 transition";
+    "w-full rounded-[1.5rem] border border-red-300 bg-red-50/30 backdrop-blur px-3 py-2.5 sm:py-2 text-base sm:text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-100 transition";
   const labelCls = "block text-xs font-black uppercase tracking-widest text-slate-500 mb-1";
   const errTextCls = "text-[11px] text-red-500 mt-1 flex items-center gap-1";
 
@@ -251,7 +251,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
         <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
         <div className="flex min-h-full items-center justify-center p-4">
           <div
-            className={`relative z-10 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
+            className={`relative z-10 w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-5 sm:p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
           >
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-800">
@@ -328,7 +328,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
                     />
                     {fieldErrors.name && <p className={errTextCls}><AlertTriangle size={11} /> {fieldErrors.name}</p>}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>Gender</label>
                       <select className={inputCls} value={gender} onChange={(e) => setGender(e.target.value as "Male" | "Female")}>
@@ -453,7 +453,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>RSBSA number</label>
                   <input
@@ -515,18 +515,18 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
                 </p>
               )}
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition"
+                  className="w-full sm:w-auto rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-white/70 transition"
                 >
                   {mode === "add" ? "Close" : "Cancel"}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className={`rounded-[1.5rem] px-5 py-2 text-sm font-black text-white shadow-lg transition ${
+                  className={`w-full sm:w-auto rounded-[1.5rem] px-5 py-2.5 sm:py-2 text-sm font-black text-white shadow-lg transition ${
                     saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : dupeWarning ? "bg-amber-500 hover:bg-amber-600 shadow-amber-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
                   }`}
                 >
