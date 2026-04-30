@@ -20,7 +20,7 @@ import ProgramsView from "@/components/dashboard/ProgramsView";
 import { BARANGAYS } from "@/lib/data";
 import {
   Sprout, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList,
-  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins, Calendar,
+  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins, Calendar, Printer,
 } from "lucide-react";
 
 const TAB_DESCRIPTIONS: Record<string, string> = {
@@ -264,6 +264,21 @@ export default function Page() {
                   )}
                 </div>
                 <ExportButton />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    if (overviewBarangay && overviewBarangay !== "All") params.set("barangay", overviewBarangay);
+                    if (overviewDateFrom) params.set("from", overviewDateFrom);
+                    if (overviewDateTo) params.set("to", overviewDateTo);
+                    const qs = params.toString();
+                    window.open(`/print${qs ? `?${qs}` : ""}`, "_blank", "noopener,noreferrer");
+                  }}
+                  className="flex items-center gap-2 rounded-[1.5rem] border border-white/40 bg-white/50 backdrop-blur px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:bg-white/70"
+                  title="Open printable report in a new tab"
+                >
+                  <Printer size={16} className="text-emerald-600" /> Print
+                </button>
               </div>
             )}
           </div>

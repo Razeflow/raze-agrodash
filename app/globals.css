@@ -138,6 +138,34 @@ body {
   background-color: rgba(0, 0, 0, 0.20);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Print rules — used by /print route + general printable behaviour            */
+/* -------------------------------------------------------------------------- */
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  /* Drop animations and shimmer for the printed snapshot */
+  .fade-up,
+  .skeleton-shimmer,
+  .dashboard-shell-enter,
+  .tab-pane-enter {
+    animation: none !important;
+  }
+  /* Recharts SVGs need explicit fills for crisp B/W or colour print */
+  .recharts-surface { fill-opacity: 1 !important; }
+  /* Avoid orphaned chart cards across page breaks */
+  .recharts-wrapper { break-inside: avoid; }
+  /* Suppress any leftover scrollbars in printed output */
+  ::-webkit-scrollbar { display: none; }
+  @page {
+    margin: 14mm 12mm;
+    size: A4;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dashboard-shell-enter,
   .tab-pane-enter,
