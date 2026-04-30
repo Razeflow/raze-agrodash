@@ -15,6 +15,33 @@ import { BARANGAYS, normalizeCalamitySubCategory } from "./data";
 import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
 
+/**
+ * Translate raw Supabase / Postgres errors into user-friendly messages.
+ * Most importantly converts CHECK constraint violations (code 23514) — which
+ * surface as "new row for relation … violates check constraint …" — into a
+ * sentence an LGU encoder can act on. Other errors fall back to the raw
+ * message so we never silently lose information.
+ */
+function friendlyDbError(error: { code?: string; message: string }): string {
+  if (error.code === "23514") {
+    const msg = error.message;
+    if (msg.includes("planting_area_sane")) return "Planting area is out of range — must be 0–10,000 ha.";
+    if (msg.includes("harvest_bags_sane")) return "Harvest output is out of range — must be 0–1,000,000 bags.";
+    if (msg.includes("pests_damage_sane") || msg.includes("calamity_damage_sane"))
+      return "Damage area is out of range — must be 0–10,000 ha.";
+    if (msg.includes("stocking_sane") || msg.includes("fishery_harvest_sane"))
+      return "Fishery value is out of range — must be 0–1,000,000.";
+    if (msg.includes("total_farmers_sane")) return "Farmer count is out of range — must be 0–10,000.";
+    if (msg.includes("period_month_valid")) return "Reporting month must be between 1 and 12.";
+    if (msg.includes("period_year_valid")) return "Reporting year must be between 2020 and 2100.";
+    return "One of the values failed a sanity check — please verify and try again.";
+  }
+  if (error.code === "23505") return "That record already exists (duplicate value).";
+  if (error.code === "23503") return "Referenced record was not found — please refresh and retry.";
+  if (error.code === "23502") return "A required field was missing.";
+  return error.message;
+}
+
 export type AddFarmerResult = { ok: true; id: string } | { ok: false; message: string };
 /** Optional display name when creating a new household from the farmer form (not stored on farmers row). */
 export type AddFarmerInput = Omit<Farmer, "id" | "created_at" | "updated_at"> & {
@@ -435,7 +462,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       updated_at: now,
     } as AgriRecord;
     const { error } = await supabase.from("agri_records").insert(agriRecordInsertRow(newRecord));
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
     setRecords((prev) => [...prev, newRecord]);
     return { ok: true };
   }
@@ -450,7 +477,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       .from("agri_records")
       .update(agriRecordInsertRow(merged))
       .eq("id", id);
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
     setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...payload, updated_at: now } : r)));
     return { ok: true };
   }
@@ -616,7 +643,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       updated_at: now,
     });
     const { error } = await supabase.from("farmers").insert(farmerInsertRow(row));
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
     setFarmers((prev) => [...prev, row]);
     if (row.household_id && row.is_household_head) {
       await demoteOtherHouseholdHeads(row.household_id, row.id);
@@ -630,7 +657,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       .from("farmers")
       .update({ ...data, updated_at: iso })
       .eq("id", id);
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
 
     const updatedFarmers = farmersRef.current.map((f) =>
       f.id === id ? { ...f, ...data, updated_at: iso } : f,

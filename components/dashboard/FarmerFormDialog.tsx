@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
 import { uploadFarmerPhoto } from "@/lib/farmer-photo";
+import { farmerFormSchema, zodIssuesToErrors } from "@/lib/validations";
 
 type Props = {
   open: boolean;
@@ -49,6 +50,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
   const [saving, setSaving] = useState(false);
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [isHouseholdHead, setIsHouseholdHead] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const householdsInBarangay = useMemo(
     () => households.filter((h) => h.barangay === barangay),
@@ -68,6 +70,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
       setDupeWarning(null);
       setForceAdd(false);
       setPhotoFile(null);
+      setFieldErrors({});
       if (mode === "edit" && initialData) {
         setName(initialData.name);
         setGender(initialData.gender);
@@ -104,8 +107,23 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
     setErrorMsg(null);
+
+    // Zod-driven validation. Inline messages keep the existing UX of
+    // per-field hints; we still bail before hitting Supabase.
+    const parsed = farmerFormSchema.safeParse({
+      name,
+      gender,
+      barangay,
+      rsbsa_number: rsbsaNumber,
+      birth_date: birthDate,
+      civil_status: civilStatus,
+    });
+    if (!parsed.success) {
+      setFieldErrors(zodIssuesToErrors(parsed.error.issues));
+      return;
+    }
+    setFieldErrors({});
 
     const basePayload = {
       name: name.trim(),
@@ -222,7 +240,10 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
 
   const inputCls =
     "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
+  const inputErrCls =
+    "w-full rounded-[1.5rem] border border-red-300 bg-red-50/30 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-100 transition";
   const labelCls = "block text-xs font-black uppercase tracking-widest text-slate-500 mb-1";
+  const errTextCls = "text-[11px] text-red-500 mt-1 flex items-center gap-1";
 
   return (
     <DialogPortal>
@@ -294,16 +315,18 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
                   <div>
                     <label className={labelCls}>Full Name</label>
                     <input
-                      className={inputCls}
+                      className={fieldErrors.name ? inputErrCls : inputCls}
                       value={name}
                       onChange={(e) => {
                         setName(e.target.value);
                         setDupeWarning(null);
                         setForceAdd(false);
+                        if (fieldErrors.name) setFieldErrors((er) => ({ ...er, name: "" }));
                       }}
                       placeholder="e.g. Juan Dela Cruz"
                       required
                     />
+                    {fieldErrors.name && <p className={errTextCls}><AlertTriangle size={11} /> {fieldErrors.name}</p>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -433,11 +456,25 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>RSBSA number</label>
-                  <input className={inputCls} value={rsbsaNumber} onChange={(e) => setRsbsaNumber(e.target.value)} placeholder="Optional" />
+                  <input
+                    className={fieldErrors.rsbsa_number ? inputErrCls : inputCls}
+                    value={rsbsaNumber}
+                    onChange={(e) => { setRsbsaNumber(e.target.value); if (fieldErrors.rsbsa_number) setFieldErrors((er) => ({ ...er, rsbsa_number: "" })); }}
+                    placeholder="Optional"
+                  />
+                  {fieldErrors.rsbsa_number && <p className={errTextCls}><AlertTriangle size={11} /> {fieldErrors.rsbsa_number}</p>}
                 </div>
                 <div>
                   <label className={labelCls}>Birth date</label>
-                  <input className={inputCls} type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} />
+                  <input
+                    className={fieldErrors.birth_date ? inputErrCls : inputCls}
+                    type="date"
+                    value={birthDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    min="1900-01-01"
+                    onChange={(e) => { setBirthDate(e.target.value); if (fieldErrors.birth_date) setFieldErrors((er) => ({ ...er, birth_date: "" })); }}
+                  />
+                  {fieldErrors.birth_date && <p className={errTextCls}><AlertTriangle size={11} /> {fieldErrors.birth_date}</p>}
                 </div>
               </div>
 

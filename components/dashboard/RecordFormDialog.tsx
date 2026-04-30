@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
 import FarmerSelectDialog from "./FarmerSelectDialog";
+import { recordFormSchema, RECORD_LIMITS, zodIssuesToErrors } from "@/lib/validations";
 
 type Props = {
   open: boolean;
@@ -30,6 +31,15 @@ type FormErrors = {
   commodity?: string;
   farmer_ids?: string;
   period?: string;
+  // Numeric/cross-field errors raised by the Zod schema.
+  planting_area_hectares?: string;
+  harvesting_output_bags?: string;
+  damage_pests_hectares?: string;
+  damage_calamity_hectares?: string;
+  stocking?: string;
+  harvesting_fishery?: string;
+  calamity?: string;
+  remarks?: string;
 };
 
 function getEmptyForm() {
@@ -111,10 +121,15 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
   const yearOptions = Array.from({ length: 4 }, (_, i) => currentYear - 2 + i);
 
   function validate(): FormErrors {
-    const errs: FormErrors = {};
-    if (!form.commodity) errs.commodity = "Commodity is required";
-    if (form.farmer_ids.length === 0) errs.farmer_ids = "At least one farmer/fisherfolk must be selected";
-    if (!form.period_month || !form.period_year) errs.period = "Reporting period is required";
+    const result = recordFormSchema.safeParse(form);
+    if (result.success) return {};
+    const fieldErrors = zodIssuesToErrors(result.error.issues);
+    // Collapse period_month / period_year errors under the shared `period` key
+    // so the existing single-row "Reporting period is required" UI still works.
+    const errs: FormErrors = { ...(fieldErrors as FormErrors) };
+    if (fieldErrors.period_month || fieldErrors.period_year) {
+      errs.period = fieldErrors.period_month || fieldErrors.period_year;
+    }
     return errs;
   }
 
@@ -319,21 +334,57 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className={labelCls}>Planting Area (hectares)</label>
-                    <input type="number" min={0} step="0.01" className={inputCls} value={form.planting_area_hectares || ""} onChange={(e) => setForm((f) => ({ ...f, planting_area_hectares: parseFloat(e.target.value) || 0 }))} />
+                    <input
+                      type="number"
+                      min={0}
+                      max={RECORD_LIMITS.AREA_MAX}
+                      step="0.01"
+                      className={errors.planting_area_hectares ? inputErrCls : inputCls}
+                      value={form.planting_area_hectares || ""}
+                      onChange={(e) => { setForm((f) => ({ ...f, planting_area_hectares: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, planting_area_hectares: undefined, damage_calamity_hectares: undefined })); }}
+                    />
+                    {errors.planting_area_hectares && <p className={errTextCls}><AlertCircle size={11} /> {errors.planting_area_hectares}</p>}
                   </div>
                   <div>
                     <label className={labelCls}>Harvest Output (bags @ 40kg)</label>
-                    <input type="number" min={0} step="0.01" className={inputCls} value={form.harvesting_output_bags || ""} onChange={(e) => setForm((f) => ({ ...f, harvesting_output_bags: parseFloat(e.target.value) || 0 }))} />
+                    <input
+                      type="number"
+                      min={0}
+                      max={RECORD_LIMITS.BAGS_MAX}
+                      step="0.01"
+                      className={errors.harvesting_output_bags ? inputErrCls : inputCls}
+                      value={form.harvesting_output_bags || ""}
+                      onChange={(e) => { setForm((f) => ({ ...f, harvesting_output_bags: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, harvesting_output_bags: undefined })); }}
+                    />
+                    {errors.harvesting_output_bags && <p className={errTextCls}><AlertCircle size={11} /> {errors.harvesting_output_bags}</p>}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className={labelCls}>Damage -- Pests & Diseases (ha)</label>
-                    <input type="number" min={0} step="0.01" className={inputCls} value={form.damage_pests_hectares || ""} onChange={(e) => setForm((f) => ({ ...f, damage_pests_hectares: parseFloat(e.target.value) || 0 }))} />
+                    <input
+                      type="number"
+                      min={0}
+                      max={RECORD_LIMITS.AREA_MAX}
+                      step="0.01"
+                      className={errors.damage_pests_hectares ? inputErrCls : inputCls}
+                      value={form.damage_pests_hectares || ""}
+                      onChange={(e) => { setForm((f) => ({ ...f, damage_pests_hectares: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, damage_pests_hectares: undefined, damage_calamity_hectares: undefined })); }}
+                    />
+                    {errors.damage_pests_hectares && <p className={errTextCls}><AlertCircle size={11} /> {errors.damage_pests_hectares}</p>}
                   </div>
                   <div>
                     <label className={labelCls}>Damage -- Calamity (ha)</label>
-                    <input type="number" min={0} step="0.01" className={inputCls} value={form.damage_calamity_hectares || ""} onChange={(e) => setForm((f) => ({ ...f, damage_calamity_hectares: parseFloat(e.target.value) || 0 }))} />
+                    <input
+                      type="number"
+                      min={0}
+                      max={RECORD_LIMITS.AREA_MAX}
+                      step="0.01"
+                      className={errors.damage_calamity_hectares ? inputErrCls : inputCls}
+                      value={form.damage_calamity_hectares || ""}
+                      onChange={(e) => { setForm((f) => ({ ...f, damage_calamity_hectares: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, damage_calamity_hectares: undefined })); }}
+                    />
+                    {errors.damage_calamity_hectares && <p className={errTextCls}><AlertCircle size={11} /> {errors.damage_calamity_hectares}</p>}
                   </div>
                 </div>
               </>
@@ -344,11 +395,29 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelCls}>Stocking</label>
-                  <input type="number" min={0} step="0.01" className={inputCls} value={form.stocking || ""} onChange={(e) => setForm((f) => ({ ...f, stocking: parseFloat(e.target.value) || 0 }))} />
+                  <input
+                    type="number"
+                    min={0}
+                    max={RECORD_LIMITS.STOCKING_MAX}
+                    step="0.01"
+                    className={errors.stocking ? inputErrCls : inputCls}
+                    value={form.stocking || ""}
+                    onChange={(e) => { setForm((f) => ({ ...f, stocking: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, stocking: undefined })); }}
+                  />
+                  {errors.stocking && <p className={errTextCls}><AlertCircle size={11} /> {errors.stocking}</p>}
                 </div>
                 <div>
                   <label className={labelCls}>Harvesting (Fishery)</label>
-                  <input type="number" min={0} step="0.01" className={inputCls} value={form.harvesting_fishery || ""} onChange={(e) => setForm((f) => ({ ...f, harvesting_fishery: parseFloat(e.target.value) || 0 }))} />
+                  <input
+                    type="number"
+                    min={0}
+                    max={RECORD_LIMITS.FISHERY_HARVEST_MAX}
+                    step="0.01"
+                    className={errors.harvesting_fishery ? inputErrCls : inputCls}
+                    value={form.harvesting_fishery || ""}
+                    onChange={(e) => { setForm((f) => ({ ...f, harvesting_fishery: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, harvesting_fishery: undefined })); }}
+                  />
+                  {errors.harvesting_fishery && <p className={errTextCls}><AlertCircle size={11} /> {errors.harvesting_fishery}</p>}
                 </div>
               </div>
             )}
@@ -376,11 +445,12 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
               <div className="col-span-2">
                 <label className={labelCls}>Calamity event or name</label>
                 <input
-                  className={inputCls}
+                  className={errors.calamity ? inputErrCls : inputCls}
                   value={form.calamity}
-                  onChange={(e) => setForm((f) => ({ ...f, calamity: e.target.value }))}
+                  onChange={(e) => { setForm((f) => ({ ...f, calamity: e.target.value })); if (submitted) setErrors((er) => ({ ...er, calamity: undefined })); }}
                   placeholder="e.g. Typhoon Egay, barangay sitio — or None"
                 />
+                {errors.calamity && <p className={errTextCls}><AlertCircle size={11} /> {errors.calamity}</p>}
               </div>
             </div>
 
