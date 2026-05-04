@@ -66,7 +66,7 @@ export default function BarangayLeaderboard({
       if (!stats[r.barangay]) return;
       stats[r.barangay].entries++;
       stats[r.barangay].farmers += r.total_farmers;
-      stats[r.barangay].production += r.harvesting_output_bags;
+      stats[r.barangay].production += r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags;
       stats[r.barangay].area += r.planting_area_hectares;
       stats[r.barangay].calamityHa += r.damage_calamity_hectares;
       commoditiesByBrgy[r.barangay].add(r.commodity);

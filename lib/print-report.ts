@@ -161,14 +161,14 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
   // Compute stats
   const totalMale = recs.reduce((s, r) => s + r.farmer_male, 0);
   const totalFemale = recs.reduce((s, r) => s + r.farmer_female, 0);
-  const totalBags = recs.reduce((s, r) => s + r.harvesting_output_bags, 0);
+  const totalBags = recs.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0);
   const totalArea = recs.reduce((s, r) => s + r.planting_area_hectares, 0);
   const totalDmg = recs.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
   const dmgPct = totalArea > 0 ? ((totalDmg / totalArea) * 100).toFixed(1) : "0";
 
   // Production by commodity
   const prodByCom: Record<string, number> = {};
-  recs.forEach((r) => { prodByCom[r.commodity] = (prodByCom[r.commodity] || 0) + r.harvesting_output_bags; });
+  recs.forEach((r) => { prodByCom[r.commodity] = (prodByCom[r.commodity] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags); });
   const topCommodity = Object.entries(prodByCom).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
 
   // Damage by commodity
@@ -188,7 +188,7 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
       farmers: bf.length,
       male: bf.filter((f) => f.gender === "Male").length,
       female: bf.filter((f) => f.gender === "Female").length,
-      bags: br.reduce((s, r) => s + r.harvesting_output_bags, 0),
+      bags: br.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0),
       area: br.reduce((s, r) => s + r.planting_area_hectares, 0),
       damage: br.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0),
     };
@@ -225,7 +225,7 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
 
     // Per-barangay commodity breakdown
     const brgyCom: Record<string, number> = {};
-    brgyRecs.forEach((r) => { brgyCom[r.commodity] = (brgyCom[r.commodity] || 0) + r.harvesting_output_bags; });
+    brgyRecs.forEach((r) => { brgyCom[r.commodity] = (brgyCom[r.commodity] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags); });
     const brgyComData = Object.entries(brgyCom).map(([name, bags]) => ({
       label: name, value: bags, color: COMMODITY_COLORS[name] || "#888",
     }));

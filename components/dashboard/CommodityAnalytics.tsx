@@ -84,7 +84,7 @@ export default function CommodityAnalytics({
             return true;
           })
           .forEach((r) => {
-            t[r.commodity] = (t[r.commodity] || 0) + r.harvesting_output_bags;
+            t[r.commodity] = (t[r.commodity] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags);
           });
         return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
       })()

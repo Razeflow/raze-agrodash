@@ -49,7 +49,7 @@ export default function SubCategoryAnalytics({
     records
       .filter((r) => r.commodity === active)
       .forEach((r) => {
-        totals[r.sub_category] = (totals[r.sub_category] || 0) + r.harvesting_output_bags;
+        totals[r.sub_category] = (totals[r.sub_category] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags);
       });
     return Object.entries(totals)
       .map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }))

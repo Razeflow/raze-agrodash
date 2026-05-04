@@ -722,7 +722,12 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const getFarmersByIds = useCallback((ids: string[]) => farmers.filter((f) => ids.includes(f.id)), [farmers]);
 
-  /* ── Computed / memoised values (unchanged) ───────────────────── */
+  /* ── Computed / memoised values ────────────────────────────────── */
+
+  /** Return the production value for a record: fishery uses harvesting_fishery, others use harvesting_output_bags. */
+  function getProductionValue(r: AgriRecord): number {
+    return r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags;
+  }
 
   const farmersByBarangay = useMemo(() => {
     const map: Record<string, Farmer[]> = {};
@@ -738,7 +743,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }, [vf]);
 
   const totalProduction = useMemo(() => {
-    const bags = vr.reduce((s, r) => s + r.harvesting_output_bags, 0);
+    const bags = vr.reduce((s, r) => s + getProductionValue(r), 0);
     return { bags, tons: +(bags * 0.04).toFixed(2) };
   }, [vr]);
 
@@ -750,14 +755,14 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const mostProducedCommodity = useMemo(() => {
     const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + r.harvesting_output_bags; });
+    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + getProductionValue(r); });
     const sorted = Object.entries(t).sort((a, b) => b[1] - a[1]);
     return sorted[0]?.[0] ?? "N/A";
   }, [vr]);
 
   const productionByCommodity = useMemo(() => {
     const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + r.harvesting_output_bags; });
+    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + getProductionValue(r); });
     return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
   }, [vr]);
 
@@ -765,7 +770,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const t: Record<string, { commodity: string; bags: number }> = {};
     vr.forEach((r) => {
       if (!t[r.sub_category]) t[r.sub_category] = { commodity: r.commodity, bags: 0 };
-      t[r.sub_category].bags += r.harvesting_output_bags;
+      t[r.sub_category].bags += getProductionValue(r);
     });
     return Object.entries(t).map(([name, v]) => ({ name, ...v, tons: +(v.bags * 0.04).toFixed(2) }));
   }, [vr]);

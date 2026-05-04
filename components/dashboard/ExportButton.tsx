@@ -75,12 +75,13 @@ export default function ExportButton() {
 
   // ── CSV Exports ────────────────────────────────────────────────────────
   function exportRecordsCSV() {
-    const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest (bags)", "Damage Pests (ha)", "Damage Calamity (ha)", "Pests/Diseases", "CalamitySubCategory", "CalamityEvent", "Remarks", "Created"];
+    const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest (bags/units)", "Damage Pests (ha)", "Damage Calamity (ha)", "Stocking", "Fishery Harvest", "Pests/Diseases", "CalamitySubCategory", "CalamityEvent", "Remarks", "Created"];
     const rows = filteredRecords.map((r) => [
       r.barangay, r.commodity, r.sub_category,
       r.farmer_male, r.farmer_female, r.total_farmers,
-      r.planting_area_hectares, r.harvesting_output_bags,
+      r.planting_area_hectares, r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags,
       r.damage_pests_hectares, r.damage_calamity_hectares,
+      r.stocking, r.harvesting_fishery,
       `"${r.pests_diseases}"`, r.calamity_sub_category, `"${r.calamity}"`, `"${r.remarks}"`,
       r.created_at.slice(0, 10),
     ].join(","));
@@ -127,7 +128,7 @@ export default function ExportButton() {
       const [month, barangay] = key.split("|");
       return [month, barangay, group.length,
         group.reduce((s, r) => s + r.total_farmers, 0),
-        group.reduce((s, r) => s + r.harvesting_output_bags, 0),
+        group.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0),
         group.reduce((s, r) => s + r.planting_area_hectares, 0).toFixed(2),
         group.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2),
       ].join(",");
@@ -142,7 +143,7 @@ export default function ExportButton() {
     const rows = Object.entries(grouped).map(([barangay, group]) => {
       const male = group.reduce((s, r) => s + r.farmer_male, 0);
       const female = group.reduce((s, r) => s + r.farmer_female, 0);
-      const harvest = group.reduce((s, r) => s + r.harvesting_output_bags, 0);
+      const harvest = group.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0);
       const area = group.reduce((s, r) => s + r.planting_area_hectares, 0);
       const dmg = group.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
       const lastUpdated = group.reduce((latest, r) => r.created_at > latest ? r.created_at : latest, group[0].created_at).slice(0, 10);
