@@ -17,7 +17,7 @@ if (!SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-async function runSQL(sql) {
+async function _runSQL(sql) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc`, {
     method: "POST",
     headers: {
@@ -31,7 +31,7 @@ async function runSQL(sql) {
   return res;
 }
 
-async function execSQL(sql, label) {
+async function _execSQL(sql, label) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/`, {
     method: "POST",
     headers: {
@@ -46,8 +46,8 @@ async function execSQL(sql, label) {
 }
 
 // Use the pg_net or direct SQL approach via Supabase Management API
-async function executeSQLViaManagement(sql, label) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/`, {
+async function _executeSQLViaManagement(_sql, _label) {
+  const _res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/`, {
     method: "POST",
     headers: {
       "apikey": SERVICE_ROLE_KEY,
@@ -58,7 +58,7 @@ async function executeSQLViaManagement(sql, label) {
 }
 
 // ── Step 1: Create tables via SQL Editor proxy ──
-async function setupSchema() {
+async function _setupSchema() {
   console.log("\n📦 Step 1: Creating database schema...\n");
 
   const schemaPath = path.join(__dirname, "schema.sql");

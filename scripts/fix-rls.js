@@ -50,9 +50,9 @@ const statements = [
 
 async function run() {
   let ok = 0, fail = 0;
-  for (const sql of statements) {
+  for (const _sql of statements) {
     try {
-      const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/", {
+      const _res = await fetch(SUPABASE_URL + "/rest/v1/rpc/", {
         method: "POST",
         headers: {
           apikey: KEY,
