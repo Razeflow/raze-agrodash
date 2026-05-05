@@ -7,8 +7,10 @@ import {
   useEffect,
   useMemo,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 
 // ── Types (exported so downstream can import) ──────────────────────────
@@ -85,6 +87,8 @@ function rowToProfile(row: ProfileRow): UserProfile {
 // ── Provider ───────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const logoutInProgressRef = useRef(false);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [allUsers, setAllUsers] = useState<ManagedUser[]>([]);
@@ -117,7 +121,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (
+        logoutInProgressRef.current &&
+        (event === "TOKEN_REFRESHED" || event === "SIGNED_IN")
+      ) {
+        return;
+      }
       if (event === "SIGNED_OUT" || !session?.user) {
+        logoutInProgressRef.current = false;
         setUser(null);
         setAllUsers([]);
         return;
@@ -181,11 +192,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   // ── logout ─────────────────────────────────────────────────────────
-  const logout = useCallback(async () => {
-    await supabase.auth.signOut();
+  // Clear UI immediately; finish signOut before router.refresh() so middleware
+  // cannot refresh cookies while the session is still valid (would re-trigger
+  // TOKEN_REFRESHED and repopulate `user`). Ignore TOKEN_REFRESHED/SIGNED_IN
+  // while logoutInProgressRef is true.
+  const logout = useCallback(() => {
+    logoutInProgressRef.current = true;
     setUser(null);
     setAllUsers([]);
-  }, []);
+    void supabase.auth.signOut().finally(() => {
+      logoutInProgressRef.current = false;
+      router.refresh();
+    });
+  }, [router]);
 
   // ── changePassword ─────────────────────────────────────────────────
   const changePassword = useCallback(

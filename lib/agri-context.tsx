@@ -377,9 +377,10 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     [farmerOrganizations],
   );
 
+  /** Use full `householdSubsidies` (not `vSubs`) so lines added in-session always appear; RLS already scoped the load. */
   const getSubsidiesForHousehold = useCallback(
-    (householdId: string) => vSubs.filter((s) => s.household_id === householdId),
-    [vSubs],
+    (householdId: string) => householdSubsidies.filter((s) => s.household_id === householdId),
+    [householdSubsidies],
   );
 
   /* ── Household Subsidies CRUD ─────────────────────────────────── */
@@ -411,7 +412,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       updated_at: now,
     };
     const { error } = await supabase.from("household_subsidies").insert(s);
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
     setHouseholdSubsidies((prev) => [...prev, s]);
     return { ok: true, subsidy: s };
   }
@@ -434,7 +435,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       .from("household_subsidies")
       .update({ ...patch, updated_at: now })
       .eq("id", id);
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
     setHouseholdSubsidies((prev) =>
       prev.map((x) => (x.id === id ? { ...x, ...patch, updated_at: now } : x)),
     );
@@ -443,7 +444,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   async function deleteHouseholdSubsidy(id: string): Promise<MutationResult> {
     const { error } = await supabase.from("household_subsidies").delete().eq("id", id);
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: friendlyDbError(error) };
     setHouseholdSubsidies((prev) => prev.filter((x) => x.id !== id));
     return { ok: true };
   }
