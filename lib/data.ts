@@ -162,6 +162,125 @@ export function formatHouseholdSubsidySummary(subs: HouseholdSubsidy[]): string 
     .join("; ");
 }
 
+export type FarmerAssetCategory =
+  | "planting_area"
+  | "machinery"
+  | "fishpond"
+  | "facility";
+
+export const FARMER_ASSET_CATEGORIES: FarmerAssetCategory[] = [
+  "planting_area",
+  "machinery",
+  "fishpond",
+  "facility",
+];
+
+export const FARMER_ASSET_CATEGORY_LABELS: Record<FarmerAssetCategory, string> = {
+  planting_area: "Planting area",
+  machinery: "Machinery",
+  fishpond: "Fishpond",
+  facility: "Facility",
+};
+
+export type MachinerySubCategory =
+  | "hand_tractor"
+  | "hand_tractor_with_trailer"
+  | "multi_tiller"
+  | "combine_thresher"
+  | "walk_behind_reaper"
+  | "transplanter"
+  | "others";
+
+export const MACHINERY_SUB_CATEGORIES: MachinerySubCategory[] = [
+  "hand_tractor",
+  "hand_tractor_with_trailer",
+  "multi_tiller",
+  "combine_thresher",
+  "walk_behind_reaper",
+  "transplanter",
+  "others",
+];
+
+export const MACHINERY_SUB_CATEGORY_LABELS: Record<MachinerySubCategory, string> = {
+  hand_tractor: "Hand tractor",
+  hand_tractor_with_trailer: "Hand tractor with trailer",
+  multi_tiller: "Multi tiller",
+  combine_thresher: "Combine thresher",
+  walk_behind_reaper: "Walk behind reaper",
+  transplanter: "Transplanter",
+  others: "Others",
+};
+
+export type FacilitySubCategory = "granary" | "others";
+
+export const FACILITY_SUB_CATEGORIES: FacilitySubCategory[] = ["granary", "others"];
+
+export const FACILITY_SUB_CATEGORY_LABELS: Record<FacilitySubCategory, string> = {
+  granary: "Granary",
+  others: "Others",
+};
+
+export type FarmerAsset = {
+  id: string;
+  farmer_id: string;
+  category: FarmerAssetCategory;
+  sub_category: string | null;
+  product_detail: string | null;
+  quantity: number | null;
+  unit: string | null;
+  area_hectares: number | null;
+  acquired_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function isFarmerAssetCategory(s: string): s is FarmerAssetCategory {
+  return (FARMER_ASSET_CATEGORIES as readonly string[]).includes(s);
+}
+
+/** Sub-category options for a given asset category. Returns empty array if none apply. */
+export function getAssetSubCategoryOptions(
+  category: FarmerAssetCategory,
+): { value: string; label: string }[] {
+  if (category === "machinery") {
+    return MACHINERY_SUB_CATEGORIES.map((s) => ({ value: s, label: MACHINERY_SUB_CATEGORY_LABELS[s] }));
+  }
+  if (category === "facility") {
+    return FACILITY_SUB_CATEGORIES.map((s) => ({ value: s, label: FACILITY_SUB_CATEGORY_LABELS[s] }));
+  }
+  return [];
+}
+
+/** Human-readable label for a stored sub_category code (machinery / facility). */
+export function formatAssetSubCategory(category: FarmerAssetCategory, sub: string | null): string {
+  if (!sub) return "";
+  if (category === "machinery") {
+    return MACHINERY_SUB_CATEGORY_LABELS[sub as MachinerySubCategory] ?? sub;
+  }
+  if (category === "facility") {
+    return FACILITY_SUB_CATEGORY_LABELS[sub as FacilitySubCategory] ?? sub;
+  }
+  return sub;
+}
+
+/** Compact one-line summary of a single asset for lists / CSV. */
+export function formatFarmerAssetSummary(a: FarmerAsset): string {
+  const cat = FARMER_ASSET_CATEGORY_LABELS[a.category];
+  const sub = formatAssetSubCategory(a.category, a.sub_category);
+  const det = a.product_detail?.trim() ? `:${a.product_detail.trim()}` : "";
+  const qty =
+    a.quantity != null && !Number.isNaN(a.quantity)
+      ? ` x${a.quantity}${a.unit?.trim() ? ` ${a.unit.trim()}` : ""}`
+      : "";
+  const ha =
+    a.area_hectares != null && !Number.isNaN(a.area_hectares)
+      ? ` ${a.area_hectares} ha`
+      : "";
+  const head = sub ? `${cat} (${sub})` : cat;
+  return `${head}${det}${qty}${ha}`.replace(/\s+/g, " ").trim();
+}
+
 export type Farmer = {
   id: string;
   name: string;

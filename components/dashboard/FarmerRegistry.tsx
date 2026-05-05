@@ -2,15 +2,16 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
-import { BARANGAYS, formatPeriod, ORG_TYPE_LABELS, formatHouseholdSubsidySummary } from "@/lib/data";
+import { BARANGAYS, formatPeriod, ORG_TYPE_LABELS, formatHouseholdSubsidySummary, formatFarmerAssetSummary } from "@/lib/data";
 import type { Farmer, Household } from "@/lib/data";
 import {
   Search, UserPlus, Pencil, Trash2, MapPin, Users, X,
-  User, Calendar, ChevronRight, ArrowLeft, Home, Building2, UserMinus, HandCoins,
+  User, Calendar, ChevronRight, ArrowLeft, Home, Building2, UserMinus, HandCoins, Tractor,
 } from "lucide-react";
 import FarmerFormDialog from "./FarmerFormDialog";
 import HouseholdEditDialog from "./HouseholdEditDialog";
 import HouseholdBrowseDialog from "./HouseholdBrowseDialog";
+import FarmerAssetsDialog from "./FarmerAssetsDialog";
 import BentoCard from "@/components/ui/BentoCard";
 import DialogPortal from "@/components/ui/DialogPortal";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
@@ -35,6 +36,7 @@ export default function FarmerRegistry() {
     updateFarmer,
     getOrganizationIdsForFarmer,
     getSubsidiesForHousehold,
+    getAssetsForFarmer,
   } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
 
@@ -58,6 +60,7 @@ export default function FarmerRegistry() {
 
   const [householdEdit, setHouseholdEdit] = useState<Household | null>(null);
   const [householdBrowseOpen, setHouseholdBrowseOpen] = useState(false);
+  const [assetsFarmer, setAssetsFarmer] = useState<Farmer | null>(null);
   const [registryError, setRegistryError] = useState<string | null>(null);
 
   // ── Animated mount for inline modals ──
@@ -489,6 +492,37 @@ export default function FarmerRegistry() {
                           </div>
                           <p className="text-sm text-slate-700">{orgNames || "—"}</p>
                         </div>
+
+                        {(() => {
+                          const assets = getAssetsForFarmer(selectedFarmer.id);
+                          return (
+                            <div className="rounded-2xl bg-amber-50/40 border border-amber-100/50 p-4 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 flex items-center gap-1">
+                                  <Tractor size={12} /> Assets ({assets.length})
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => setAssetsFarmer(selectedFarmer)}
+                                  className="text-[10px] font-bold text-amber-700 hover:underline"
+                                >
+                                  Manage assets
+                                </button>
+                              </div>
+                              {assets.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic">No assets recorded yet.</p>
+                              ) : (
+                                <ul className="space-y-1">
+                                  {assets.map((a) => (
+                                    <li key={a.id} className="text-xs text-slate-700">
+                                      • {formatFarmerAssetSummary(a)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </>
                     );
                   })()}
@@ -682,6 +716,8 @@ export default function FarmerRegistry() {
       />
 
       <HouseholdEditDialog open={!!householdEdit} onClose={() => setHouseholdEdit(null)} household={householdEdit} />
+
+      <FarmerAssetsDialog open={!!assetsFarmer} onClose={() => setAssetsFarmer(null)} farmer={assetsFarmer} />
 
       {/* ── Delete confirmation ── */}
       {delModal.mounted && deleteTarget && (

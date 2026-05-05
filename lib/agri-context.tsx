@@ -2,8 +2,11 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import {
   isSubsidyCategory,
+  isFarmerAssetCategory,
   type AgriRecord,
   type Farmer,
+  type FarmerAsset,
+  type FarmerAssetCategory,
   type Household,
   type HouseholdSubsidy,
   type Organization,
@@ -60,6 +63,9 @@ export type AddOrganizationResult =
   | { ok: false; message: string };
 export type AddHouseholdSubsidyResult =
   | { ok: true; subsidy: HouseholdSubsidy }
+  | { ok: false; message: string };
+export type AddFarmerAssetResult =
+  | { ok: true; asset: FarmerAsset }
   | { ok: false; message: string };
 
 /* ── Supabase insert-row builders ─────────────────────────────────── */
@@ -166,6 +172,33 @@ type AgriContextValue = {
     }>,
   ) => Promise<MutationResult>;
   deleteHouseholdSubsidy: (id: string) => Promise<MutationResult>;
+  farmerAssets: FarmerAsset[];
+  getAssetsForFarmer: (farmerId: string) => FarmerAsset[];
+  addFarmerAsset: (row: {
+    farmer_id: string;
+    category: FarmerAssetCategory;
+    sub_category?: string | null;
+    product_detail?: string | null;
+    quantity?: number | null;
+    unit?: string | null;
+    area_hectares?: number | null;
+    acquired_date?: string | null;
+    notes?: string | null;
+  }) => Promise<AddFarmerAssetResult>;
+  updateFarmerAsset: (
+    id: string,
+    patch: Partial<{
+      category: FarmerAssetCategory;
+      sub_category: string | null;
+      product_detail: string | null;
+      quantity: number | null;
+      unit: string | null;
+      area_hectares: number | null;
+      acquired_date: string | null;
+      notes: string | null;
+    }>,
+  ) => Promise<MutationResult>;
+  deleteFarmerAsset: (id: string) => Promise<MutationResult>;
   getOrganizationIdsForFarmer: (farmerId: string) => string[];
   organizationStats: { id: string; name: string; org_type: OrgType; memberCount: number }[];
   uniqueFarmersInOrganizations: number;
@@ -205,6 +238,25 @@ function normalizeHouseholdSubsidy(row: Record<string, unknown>): HouseholdSubsi
     amount_php: row.amount_php != null && row.amount_php !== "" ? Number(row.amount_php) : null,
     program_source: row.program_source != null ? String(row.program_source) : null,
     received_date: row.received_date != null ? String(row.received_date).slice(0, 10) : null,
+    notes: row.notes != null ? String(row.notes) : null,
+    created_at: String(row.created_at ?? ""),
+    updated_at: String(row.updated_at ?? ""),
+  };
+}
+
+function normalizeFarmerAsset(row: Record<string, unknown>): FarmerAsset {
+  const catRaw = String(row.category ?? "planting_area");
+  const category: FarmerAssetCategory = isFarmerAssetCategory(catRaw) ? catRaw : "planting_area";
+  return {
+    id: String(row.id),
+    farmer_id: String(row.farmer_id ?? ""),
+    category,
+    sub_category: row.sub_category != null ? String(row.sub_category) : null,
+    product_detail: row.product_detail != null ? String(row.product_detail) : null,
+    quantity: row.quantity != null && row.quantity !== "" ? Number(row.quantity) : null,
+    unit: row.unit != null ? String(row.unit) : null,
+    area_hectares: row.area_hectares != null && row.area_hectares !== "" ? Number(row.area_hectares) : null,
+    acquired_date: row.acquired_date != null ? String(row.acquired_date).slice(0, 10) : null,
     notes: row.notes != null ? String(row.notes) : null,
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
@@ -266,6 +318,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [farmerOrganizations, setFarmerOrganizations] = useState<FarmerOrganizationRow[]>([]);
   const [householdSubsidies, setHouseholdSubsidies] = useState<HouseholdSubsidy[]>([]);
+  const [farmerAssets, setFarmerAssets] = useState<FarmerAsset[]>([]);
   const [, setLoaded] = useState(false);
 
   const farmersRef = useRef<Farmer[]>(farmers);
@@ -283,6 +336,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       setOrganizations([]);
       setFarmerOrganizations([]);
       setHouseholdSubsidies([]);
+      setFarmerAssets([]);
       setLoaded(true);
       return;
     }
@@ -290,17 +344,18 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes] = await Promise.all([
+        const [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes, assetsRes] = await Promise.all([
           supabase.from("agri_records").select("*"),
           supabase.from("farmers").select("*"),
           supabase.from("households").select("*"),
           supabase.from("organizations").select("*"),
           supabase.from("farmer_organizations").select("*"),
           supabase.from("household_subsidies").select("*"),
+          supabase.from("farmer_assets").select("*"),
         ]);
         if (cancelled) return;
 
-        const errs = [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes]
+        const errs = [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes, assetsRes]
           .map((r) => r.error)
           .filter(Boolean);
         if (errs.length > 0) {
@@ -318,6 +373,9 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         setFarmerOrganizations((farmerOrgsRes.data ?? []) as FarmerOrganizationRow[]);
         setHouseholdSubsidies(
           (subsRes.data ?? []).map((r: Record<string, unknown>) => normalizeHouseholdSubsidy(r)),
+        );
+        setFarmerAssets(
+          (assetsRes.data ?? []).map((r: Record<string, unknown>) => normalizeFarmerAsset(r)),
         );
       } catch (err) {
         if (!cancelled) console.error("[AgriData] Supabase load error:", err);
@@ -359,6 +417,11 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     return householdSubsidies.filter((s) => hid.has(s.household_id));
   }, [householdSubsidies, vh]);
 
+  const vAssets = useMemo(() => {
+    const fid = new Set(vf.map((f) => f.id));
+    return farmerAssets.filter((a) => fid.has(a.farmer_id));
+  }, [farmerAssets, vf]);
+
   const vfIds = useMemo(() => new Set(vf.map((f) => f.id)), [vf]);
 
   const organizationStats = useMemo(() => {
@@ -398,6 +461,11 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   const getSubsidiesForHousehold = useCallback(
     (householdId: string) => householdSubsidies.filter((s) => s.household_id === householdId),
     [householdSubsidies],
+  );
+
+  const getAssetsForFarmer = useCallback(
+    (farmerId: string) => vAssets.filter((a) => a.farmer_id === farmerId),
+    [vAssets],
   );
 
   /* ── Household Subsidies CRUD ─────────────────────────────────── */
@@ -463,6 +531,72 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.from("household_subsidies").delete().eq("id", id);
     if (error) return { ok: false, message: friendlyDbError(error) };
     setHouseholdSubsidies((prev) => prev.filter((x) => x.id !== id));
+    return { ok: true };
+  }
+
+  /* ── Farmer Assets CRUD ───────────────────────────────────────── */
+
+  async function addFarmerAsset(row: {
+    farmer_id: string;
+    category: FarmerAssetCategory;
+    sub_category?: string | null;
+    product_detail?: string | null;
+    quantity?: number | null;
+    unit?: string | null;
+    area_hectares?: number | null;
+    acquired_date?: string | null;
+    notes?: string | null;
+  }): Promise<AddFarmerAssetResult> {
+    const now = new Date().toISOString();
+    const a: FarmerAsset = {
+      id: crypto.randomUUID(),
+      farmer_id: row.farmer_id,
+      category: row.category,
+      sub_category: row.sub_category ?? null,
+      product_detail: row.product_detail ?? null,
+      quantity: row.quantity ?? null,
+      unit: row.unit ?? null,
+      area_hectares: row.area_hectares ?? null,
+      acquired_date: row.acquired_date || null,
+      notes: row.notes ?? null,
+      created_at: now,
+      updated_at: now,
+    };
+    const { error } = await supabase.from("farmer_assets").insert(a);
+    if (error) return { ok: false, message: error.message };
+    setFarmerAssets((prev) => [...prev, a]);
+    return { ok: true, asset: a };
+  }
+
+  async function updateFarmerAsset(
+    id: string,
+    patch: Partial<{
+      category: FarmerAssetCategory;
+      sub_category: string | null;
+      product_detail: string | null;
+      quantity: number | null;
+      unit: string | null;
+      area_hectares: number | null;
+      acquired_date: string | null;
+      notes: string | null;
+    }>,
+  ): Promise<MutationResult> {
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from("farmer_assets")
+      .update({ ...patch, updated_at: now })
+      .eq("id", id);
+    if (error) return { ok: false, message: error.message };
+    setFarmerAssets((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, ...patch, updated_at: now } : x)),
+    );
+    return { ok: true };
+  }
+
+  async function deleteFarmerAsset(id: string): Promise<MutationResult> {
+    const { error } = await supabase.from("farmer_assets").delete().eq("id", id);
+    if (error) return { ok: false, message: error.message };
+    setFarmerAssets((prev) => prev.filter((x) => x.id !== id));
     return { ok: true };
   }
 
@@ -727,6 +861,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
     setFarmers(remaining);
     setFarmerOrganizations((prev) => prev.filter((r) => r.farmer_id !== id));
+    setFarmerAssets((prev) => prev.filter((a) => a.farmer_id !== id));
     setRecords((prev) =>
       prev.map((r) => {
         if (r.farmer_ids?.includes(id)) {
@@ -916,6 +1051,11 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     addHouseholdSubsidy,
     updateHouseholdSubsidy,
     deleteHouseholdSubsidy,
+    farmerAssets: vAssets,
+    getAssetsForFarmer,
+    addFarmerAsset,
+    updateFarmerAsset,
+    deleteFarmerAsset,
     getOrganizationIdsForFarmer,
     organizationStats,
     uniqueFarmersInOrganizations,
