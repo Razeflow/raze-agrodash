@@ -1,7 +1,7 @@
 "use client";
 import { useState, useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
-import { BARANGAYS } from "@/lib/data";
+import { BARANGAYS, productionOutputForRecord } from "@/lib/data";
 import { Trophy, ArrowUpDown, CloudLightning, Sprout } from "lucide-react";
 import BentoCard from "@/components/ui/BentoCard";
 
@@ -66,7 +66,7 @@ export default function BarangayLeaderboard({
       if (!stats[r.barangay]) return;
       stats[r.barangay].entries++;
       stats[r.barangay].farmers += r.total_farmers;
-      stats[r.barangay].production += r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags;
+      stats[r.barangay].production += productionOutputForRecord(r);
       stats[r.barangay].area += r.planting_area_hectares;
       stats[r.barangay].calamityHa += r.damage_calamity_hectares;
       commoditiesByBrgy[r.barangay].add(r.commodity);

@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import type { PieLabelRenderProps } from "recharts";
 import { useAgriData } from "@/lib/agri-context";
-import { COMMODITY_COLORS } from "@/lib/data";
+import { COMMODITY_COLORS, productionOutputForRecord } from "@/lib/data";
 import BentoCard from "@/components/ui/BentoCard";
 import { BarChart3, PieChart as PieChartIcon } from "lucide-react";
 
@@ -84,7 +84,7 @@ export default function CommodityAnalytics({
             return true;
           })
           .forEach((r) => {
-            t[r.commodity] = (t[r.commodity] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags);
+            t[r.commodity] = (t[r.commodity] || 0) + productionOutputForRecord(r);
           });
         return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
       })()

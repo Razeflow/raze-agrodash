@@ -5,7 +5,7 @@ import {
   convertMillimetersToTwip,
 } from "docx";
 import type { AgriRecord, Farmer } from "./data";
-import { BARANGAYS, COMMODITY_COLORS } from "./data";
+import { BARANGAYS, COMMODITY_COLORS, productionOutputForRecord } from "./data";
 
 // ── Types for the export function ─────────────────────────────────────────────
 type ExportData = {
@@ -265,7 +265,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
     const brgyRecords = records.filter((r) => r.barangay === b);
     return {
       label: b,
-      value: brgyRecords.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0),
+      value: brgyRecords.reduce((s, r) => s + productionOutputForRecord(r), 0),
       color: "#16a34a",
     };
   });
@@ -484,7 +484,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
   for (const brgy of BARANGAYS) {
     const brgyRecords = records.filter((r) => r.barangay === brgy);
     const brgyFarmers = farmers.filter((f) => f.barangay === brgy);
-    const brgyBags = brgyRecords.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0);
+    const brgyBags = brgyRecords.reduce((s, r) => s + productionOutputForRecord(r), 0);
     const brgyArea = brgyRecords.reduce((s, r) => s + r.planting_area_hectares, 0);
     const brgyDmg = brgyRecords.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
     const brgyMale = brgyFarmers.filter((f) => f.gender === "Male").length;
@@ -492,7 +492,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
 
     // Per-barangay commodity chart
     const commodityBreakdown: Record<string, number> = {};
-    brgyRecords.forEach((r) => { commodityBreakdown[r.commodity] = (commodityBreakdown[r.commodity] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags); });
+    brgyRecords.forEach((r) => { commodityBreakdown[r.commodity] = (commodityBreakdown[r.commodity] || 0) + productionOutputForRecord(r); });
     const brgyCommodityData = Object.entries(commodityBreakdown).map(([name, bags]) => ({
       label: name,
       value: bags,
@@ -563,7 +563,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
                   dataCell(r.sub_category),
                   numCell(r.total_farmers),
                   numCell(r.commodity === "Fishery" ? "—" : r.planting_area_hectares.toFixed(2)),
-                  numCell(r.commodity === "Fishery" ? `${r.harvesting_fishery} (fish)` : r.harvesting_output_bags.toLocaleString()),
+                  numCell(r.commodity === "Fishery" ? `${productionOutputForRecord(r)} (fish)` : r.harvesting_output_bags.toLocaleString()),
                   numCell(dmg > 0 ? dmg.toFixed(2) : "—"),
                 ],
               });

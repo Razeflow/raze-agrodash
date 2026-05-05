@@ -1,6 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import { useAgriData } from "@/lib/agri-context";
+import { productionOutputForRecord } from "@/lib/data";
 import StatStrip from "@/components/ui/StatStrip";
 
 export default function KpiCards({
@@ -34,12 +35,12 @@ export default function KpiCards({
     const ff = isBarangayFiltered ? farmers.filter((f) => f.barangay === barangayFilter) : farmers;
     const male = ff.filter((f) => f.gender === "Male").length;
     const female = ff.filter((f) => f.gender === "Female").length;
-    const bags = fr.reduce((s, r) => s + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags), 0);
+    const bags = fr.reduce((s, r) => s + productionOutputForRecord(r), 0);
     const area = +fr.reduce((s, r) => s + r.planting_area_hectares, 0).toFixed(2);
     const dmg = +fr.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2);
     const prodByCom: Record<string, number> = {};
     fr.forEach((r) => {
-      prodByCom[r.commodity] = (prodByCom[r.commodity] || 0) + (r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags);
+      prodByCom[r.commodity] = (prodByCom[r.commodity] || 0) + productionOutputForRecord(r);
     });
     const top = Object.entries(prodByCom).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "N/A";
     return {

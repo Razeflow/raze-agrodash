@@ -11,7 +11,13 @@ import {
   type OrgType,
   type SubsidyCategory,
 } from "./data";
-import { BARANGAYS, normalizeCalamitySubCategory } from "./data";
+import {
+  BARANGAYS,
+  normalizeCalamitySubCategory,
+  normalizeCommodity,
+  numField,
+  productionOutputForRecord,
+} from "./data";
 import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
 
@@ -224,10 +230,21 @@ function normalizeFarmer(row: Record<string, unknown>): Farmer {
 
 function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
   const r = row as unknown as AgriRecord;
+  const sub = typeof r.sub_category === "string" ? r.sub_category : String(r.sub_category ?? "");
   return {
     ...r,
-    farmer_ids: r.farmer_ids || [],
+    commodity: normalizeCommodity(r.commodity, sub),
+    farmer_ids: Array.isArray(r.farmer_ids) ? (r.farmer_ids as string[]) : [],
     calamity_sub_category: normalizeCalamitySubCategory(row.calamity_sub_category),
+    planting_area_hectares: numField(r.planting_area_hectares),
+    harvesting_output_bags: numField(r.harvesting_output_bags),
+    damage_pests_hectares: numField(r.damage_pests_hectares),
+    damage_calamity_hectares: numField(r.damage_calamity_hectares),
+    stocking: numField(r.stocking),
+    harvesting_fishery: numField(r.harvesting_fishery),
+    farmer_male: numField(r.farmer_male),
+    farmer_female: numField(r.farmer_female),
+    total_farmers: numField(r.total_farmers),
   };
 }
 
@@ -725,9 +742,8 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   /* ── Computed / memoised values ────────────────────────────────── */
 
-  /** Return the production value for a record: fishery uses harvesting_fishery, others use harvesting_output_bags. */
   function getProductionValue(r: AgriRecord): number {
-    return r.commodity === "Fishery" ? r.harvesting_fishery : r.harvesting_output_bags;
+    return productionOutputForRecord(r);
   }
 
   const farmersByBarangay = useMemo(() => {

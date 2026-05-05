@@ -227,6 +227,57 @@ export const SUB_TYPES: Record<string, string[]> = {
   "Industrial Crops": ["Sugarcane"],
 };
 
+/** Parse numeric fields from Supabase/CSV (may arrive as strings). */
+export function numField(v: unknown, fallback = 0): number {
+  if (v == null || v === "") return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Canonical commodity for analytics and forms. Fixes legacy casing/aliases and
+ * infers Fishery when `sub_category` is a known fish species.
+ */
+export function normalizeCommodity(raw: unknown, sub_category?: string): AgriRecord["commodity"] {
+  const sub = typeof sub_category === "string" ? sub_category.trim() : "";
+  if (sub && SUB_TYPES.Fishery.includes(sub)) return "Fishery";
+  if (sub && SUB_TYPES.Rice.includes(sub)) return "Rice";
+  if (sub && SUB_TYPES["High Value Crops"].includes(sub)) return "High Value Crops";
+  if (sub && SUB_TYPES["Industrial Crops"].includes(sub)) return "Industrial Crops";
+
+  const s = typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
+  if (!s) return "High Value Crops";
+
+  const lower = s.toLowerCase().replace(/\s+/g, " ");
+  const aliases: Record<string, AgriRecord["commodity"]> = {
+    fishery: "Fishery",
+    fish: "Fishery",
+    fisheries: "Fishery",
+    hvc: "High Value Crops",
+    "high value crop": "High Value Crops",
+    "high-value crops": "High Value Crops",
+    industrial: "Industrial Crops",
+  };
+  if (aliases[lower]) return aliases[lower];
+
+  const ci = COMMODITY_OPTIONS.find((c) => c.toLowerCase() === lower);
+  if (ci) return ci;
+
+  if (COMMODITY_OPTIONS.includes(s as (typeof COMMODITY_OPTIONS)[number])) return s as AgriRecord["commodity"];
+
+  return "High Value Crops";
+}
+
+/** Production total for a record: fish count for Fishery, 40kg bags for crops. */
+export function productionOutputForRecord(r: AgriRecord): number {
+  if (r.commodity === "Fishery") {
+    const fish = numField(r.harvesting_fishery);
+    if (fish > 0) return fish;
+    return numField(r.harvesting_output_bags);
+  }
+  return numField(r.harvesting_output_bags);
+}
+
 export const COMMODITY_COLORS: Record<string, string> = {
   Rice: "#16a34a",
   Corn: "#ca8a04",
