@@ -498,11 +498,6 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     [vAssets],
   );
 
-  const getAssetsForFarmer = useCallback(
-    (farmerId: string) => vAssets.filter((a) => a.farmer_id === farmerId),
-    [vAssets],
-  );
-
   /* ── Household Subsidies CRUD ─────────────────────────────────── */
 
   async function addHouseholdSubsidy(row: {
