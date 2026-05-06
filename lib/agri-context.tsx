@@ -3,12 +3,14 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback, u
 import {
   isSubsidyCategory,
   isFarmerAssetCategory,
+  isLifecycleStatus,
   type AgriRecord,
   type Farmer,
   type FarmerAsset,
   type FarmerAssetCategory,
   type Household,
   type HouseholdSubsidy,
+  type LifecycleStatus,
   type Organization,
   type FarmerOrganizationRow,
   type OrgType,
@@ -16,6 +18,8 @@ import {
 } from "./data";
 import {
   BARANGAYS,
+  damageHectaresForRecord,
+  isActiveStatus,
   normalizeCalamitySubCategory,
   normalizeCommodity,
   numField,
@@ -43,6 +47,7 @@ function friendlyDbError(error: { code?: string; message: string }): string {
     if (msg.includes("total_farmers_sane")) return "Farmer count is out of range — must be 0–10,000.";
     if (msg.includes("period_month_valid")) return "Reporting month must be between 1 and 12.";
     if (msg.includes("period_year_valid")) return "Reporting year must be between 2020 and 2100.";
+    if (msg.includes("lifecycle_status_valid")) return "Lifecycle status must be planted, damaged, harvested, or total_loss.";
     return "One of the values failed a sanity check — please verify and try again.";
   }
   if (error.code === "23505") return "That record already exists (duplicate value).";
@@ -111,6 +116,7 @@ function agriRecordInsertRow(r: AgriRecord) {
     remarks: r.remarks,
     period_month: r.period_month,
     period_year: r.period_year,
+    lifecycle_status: r.lifecycle_status,
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
@@ -280,10 +286,27 @@ function normalizeFarmer(row: Record<string, unknown>): Farmer {
   };
 }
 
+/**
+ * Derive a lifecycle status for a row that's missing the column (e.g. a record
+ * created before migration 010 was applied). Mirrors the SQL backfill so client
+ * and server agree on the inferred status.
+ */
+function deriveLifecycleStatus(r: AgriRecord): LifecycleStatus {
+  if (r.commodity === "Fishery") {
+    return numField(r.harvesting_fishery) > 0 ? "harvested" : "planted";
+  }
+  if (numField(r.harvesting_output_bags) > 0) return "harvested";
+  const damage = numField(r.damage_pests_hectares) + numField(r.damage_calamity_hectares);
+  const area = numField(r.planting_area_hectares);
+  if (area > 0 && damage >= area) return "total_loss";
+  if (damage > 0) return "damaged";
+  return "planted";
+}
+
 function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
   const r = row as unknown as AgriRecord;
   const sub = typeof r.sub_category === "string" ? r.sub_category : String(r.sub_category ?? "");
-  return {
+  const base: AgriRecord = {
     ...r,
     commodity: normalizeCommodity(r.commodity, sub),
     farmer_ids: Array.isArray(r.farmer_ids) ? (r.farmer_ids as string[]) : [],
@@ -297,7 +320,14 @@ function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
     farmer_male: numField(r.farmer_male),
     farmer_female: numField(r.farmer_female),
     total_farmers: numField(r.total_farmers),
+    lifecycle_status: isLifecycleStatus(row.lifecycle_status) ? row.lifecycle_status : "planted",
   };
+  // If the row arrived without a status (pre-migration row), derive it from
+  // the numeric fields so aggregations don't dump everything into "planted".
+  if (!isLifecycleStatus(row.lifecycle_status)) {
+    base.lifecycle_status = deriveLifecycleStatus(base);
+  }
+  return base;
 }
 
 function computeFarmerFields(farmerIds: string[], allFarmers: Farmer[]) {
@@ -899,9 +929,18 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     return { bags, tons: +(bags * 0.04).toFixed(2) };
   }, [vr]);
 
-  const totalPlantingArea = useMemo(() => +vr.reduce((s, r) => s + r.planting_area_hectares, 0).toFixed(2), [vr]);
+  // Active = planted | damaged. Excludes finalized rows so the "still in field"
+  // KPI doesn't double-count the same area after the harvest is recorded.
+  const totalPlantingArea = useMemo(
+    () =>
+      +vr
+        .filter((r) => isActiveStatus(r.lifecycle_status))
+        .reduce((s, r) => s + r.planting_area_hectares, 0)
+        .toFixed(2),
+    [vr],
+  );
   const totalDamagedArea = useMemo(
-    () => +vr.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2),
+    () => +vr.reduce((s, r) => s + damageHectaresForRecord(r), 0).toFixed(2),
     [vr],
   );
 
@@ -943,22 +982,18 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       vr
         .filter(
           (r) =>
-            r.damage_pests_hectares > 0 ||
-            r.damage_calamity_hectares > 0 ||
+            damageHectaresForRecord(r) > 0 ||
             r.pests_diseases !== "None" ||
             r.calamity !== "None" ||
             r.calamity_sub_category !== "None",
         )
-        .sort(
-          (a, b) =>
-            b.damage_pests_hectares + b.damage_calamity_hectares - (a.damage_pests_hectares + a.damage_calamity_hectares),
-        ),
+        .sort((a, b) => damageHectaresForRecord(b) - damageHectaresForRecord(a)),
     [vr],
   );
 
   const damageByCommodity = useMemo(() => {
     const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + r.damage_pests_hectares + r.damage_calamity_hectares; });
+    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + damageHectaresForRecord(r); });
     return Object.entries(t)
       .map(([name, area]) => ({ name, area: +area.toFixed(2) }))
       .sort((a, b) => b.area - a.area);
@@ -966,7 +1001,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const damageByBarangay = useMemo(() => {
     const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.barangay] = (t[r.barangay] || 0) + r.damage_pests_hectares + r.damage_calamity_hectares; });
+    vr.forEach((r) => { t[r.barangay] = (t[r.barangay] || 0) + damageHectaresForRecord(r); });
     return t;
   }, [vr]);
 
@@ -983,7 +1018,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   );
 
   const affectedFarmerCount = useMemo(
-    () => vr.filter((r) => r.damage_pests_hectares > 0 || r.damage_calamity_hectares > 0).reduce((s, r) => s + r.total_farmers, 0),
+    () => vr.filter((r) => damageHectaresForRecord(r) > 0).reduce((s, r) => s + r.total_farmers, 0),
     [vr],
   );
 
@@ -991,8 +1026,8 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const sorted = [...damageRiskData].sort((a, b) => a.created_at.localeCompare(b.created_at));
     if (sorted.length < 2) return "stable";
     const mid = Math.floor(sorted.length / 2);
-    const olderDmg = sorted.slice(0, mid).reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
-    const newerDmg = sorted.slice(mid).reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
+    const olderDmg = sorted.slice(0, mid).reduce((s, r) => s + damageHectaresForRecord(r), 0);
+    const newerDmg = sorted.slice(mid).reduce((s, r) => s + damageHectaresForRecord(r), 0);
     if (newerDmg > olderDmg * 1.1) return "increasing";
     if (newerDmg < olderDmg * 0.9) return "decreasing";
     return "stable";

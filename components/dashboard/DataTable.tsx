@@ -10,7 +10,7 @@ import {
   BARANGAYS,
   CALAMITY_SUB_CATEGORY_LABELS,
 } from "@/lib/data";
-import type { AgriRecord } from "@/lib/data";
+import type { AgriRecord, LifecycleStatus } from "@/lib/data";
 import {
   Search, Filter, Plus, Pencil, Trash2, CalendarDays, MapPin, Calendar, X,
   Table2, Wheat, BarChart3,
@@ -29,6 +29,28 @@ function CommodityBadge({ name }: { name: string }) {
       style={{ background: color + "18", color }}
     >
       {name}
+    </span>
+  );
+}
+
+const STATUS_CHIP_STYLES: Record<LifecycleStatus, string> = {
+  planted: "bg-sky-50 text-sky-700",
+  damaged: "bg-amber-50 text-amber-700",
+  harvested: "bg-emerald-50 text-emerald-700",
+  total_loss: "bg-red-50 text-red-700",
+};
+
+const STATUS_CHIP_LABELS: Record<LifecycleStatus, string> = {
+  planted: "Planted",
+  damaged: "Damaged",
+  harvested: "Harvested",
+  total_loss: "Total loss",
+};
+
+function StatusChip({ status }: { status: LifecycleStatus }) {
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_CHIP_STYLES[status]}`}>
+      {STATUS_CHIP_LABELS[status]}
     </span>
   );
 }
@@ -329,6 +351,7 @@ export default function DataTable() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <CommodityBadge name={r.commodity} />
+                          <StatusChip status={r.lifecycle_status} />
                           <span className="text-sm font-semibold text-slate-700 truncate">{r.barangay}</span>
                           {r.sub_category && (
                             <span className="text-xs text-slate-500 truncate">· {r.sub_category}</span>
@@ -368,7 +391,7 @@ export default function DataTable() {
                             </div>
                             <div className="text-right">
                               <p className="font-mono font-semibold text-emerald-600">{r.harvesting_fishery.toLocaleString()}</p>
-                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Harvest</p>
+                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pieces</p>
                             </div>
                           </>
                         ) : (

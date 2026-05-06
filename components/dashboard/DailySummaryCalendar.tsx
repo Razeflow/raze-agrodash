@@ -328,7 +328,7 @@ export default function DailySummaryCalendar({
                                 <div className="text-right flex-shrink-0 ml-3">
                                   {r.harvesting_output_bags > 0 && <p className="font-mono text-xs font-black text-emerald-600">{r.harvesting_output_bags.toLocaleString()} bags</p>}
                                   {r.planting_area_hectares > 0 && <p className="text-[10px] font-medium text-slate-400">{r.planting_area_hectares} ha</p>}
-                                  {r.commodity === "Fishery" && r.harvesting_fishery > 0 && <p className="font-mono text-xs font-black text-blue-600">{r.harvesting_fishery.toLocaleString()} fish</p>}
+                                  {r.commodity === "Fishery" && r.harvesting_fishery > 0 && <p className="font-mono text-xs font-black text-blue-600">{r.harvesting_fishery.toLocaleString()} pcs</p>}
                                 </div>
                               </div>
                             );

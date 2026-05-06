@@ -43,6 +43,36 @@ export function normalizeCalamitySubCategory(raw: unknown): CalamitySubCategory 
   return isCalamitySubCategory(raw) ? raw : "Other";
 }
 
+/**
+ * Lifecycle of a single planting / stocking event.
+ * - planted: area/stocking set, no harvest yet (default for new rows)
+ * - damaged: mid-season pests/calamity logged but not finalized
+ * - harvested: final harvest captured (only this status contributes to production totals)
+ * - total_loss: finalized with zero output; the row's planting_area counts toward damage
+ */
+export type LifecycleStatus = "planted" | "damaged" | "harvested" | "total_loss";
+
+export const LIFECYCLE_STATUSES: LifecycleStatus[] = [
+  "planted",
+  "damaged",
+  "harvested",
+  "total_loss",
+];
+
+export const LIFECYCLE_STATUS_LABELS: Record<LifecycleStatus, string> = {
+  planted: "Planted",
+  damaged: "Damaged (mid-season)",
+  harvested: "Harvested",
+  total_loss: "Total loss",
+};
+
+export function isLifecycleStatus(s: unknown): s is LifecycleStatus {
+  return typeof s === "string" && (LIFECYCLE_STATUSES as readonly string[]).includes(s);
+}
+
+export const isActiveStatus = (s: LifecycleStatus) => s === "planted" || s === "damaged";
+export const isFinalizedStatus = (s: LifecycleStatus) => s === "harvested" || s === "total_loss";
+
 export type AgriRecord = {
   id: string;
   barangay: string;
@@ -66,6 +96,8 @@ export type AgriRecord = {
   remarks: string;
   period_month: number | null; // 1-12 reporting month
   period_year: number | null;  // e.g. 2026
+  /** Lifecycle status — gates which aggregator buckets a row contributes to. */
+  lifecycle_status: LifecycleStatus;
   created_at: string;          // ISO timestamp
   updated_at: string;          // ISO timestamp
 };
@@ -166,13 +198,15 @@ export type FarmerAssetCategory =
   | "planting_area"
   | "machinery"
   | "fishpond"
-  | "facility";
+  | "facility"
+  | "livestock";
 
 export const FARMER_ASSET_CATEGORIES: FarmerAssetCategory[] = [
   "planting_area",
   "machinery",
   "fishpond",
   "facility",
+  "livestock",
 ];
 
 export const FARMER_ASSET_CATEGORY_LABELS: Record<FarmerAssetCategory, string> = {
@@ -180,6 +214,7 @@ export const FARMER_ASSET_CATEGORY_LABELS: Record<FarmerAssetCategory, string> =
   machinery: "Machinery",
   fishpond: "Fishpond",
   facility: "Facility",
+  livestock: "Livestock",
 };
 
 export type MachinerySubCategory =
@@ -220,6 +255,44 @@ export const FACILITY_SUB_CATEGORY_LABELS: Record<FacilitySubCategory, string> =
   others: "Others",
 };
 
+export type LivestockSubCategory =
+  | "cattle"
+  | "carabao"
+  | "swine"
+  | "goat"
+  | "sheep"
+  | "chicken"
+  | "duck"
+  | "turkey"
+  | "rabbit"
+  | "others";
+
+export const LIVESTOCK_SUB_CATEGORIES: LivestockSubCategory[] = [
+  "cattle",
+  "carabao",
+  "swine",
+  "goat",
+  "sheep",
+  "chicken",
+  "duck",
+  "turkey",
+  "rabbit",
+  "others",
+];
+
+export const LIVESTOCK_SUB_CATEGORY_LABELS: Record<LivestockSubCategory, string> = {
+  cattle: "Cattle",
+  carabao: "Carabao",
+  swine: "Swine",
+  goat: "Goat",
+  sheep: "Sheep",
+  chicken: "Chicken",
+  duck: "Duck",
+  turkey: "Turkey",
+  rabbit: "Rabbit",
+  others: "Others",
+};
+
 export type FarmerAsset = {
   id: string;
   farmer_id: string;
@@ -249,10 +322,13 @@ export function getAssetSubCategoryOptions(
   if (category === "facility") {
     return FACILITY_SUB_CATEGORIES.map((s) => ({ value: s, label: FACILITY_SUB_CATEGORY_LABELS[s] }));
   }
+  if (category === "livestock") {
+    return LIVESTOCK_SUB_CATEGORIES.map((s) => ({ value: s, label: LIVESTOCK_SUB_CATEGORY_LABELS[s] }));
+  }
   return [];
 }
 
-/** Human-readable label for a stored sub_category code (machinery / facility). */
+/** Human-readable label for a stored sub_category code (machinery / facility / livestock). */
 export function formatAssetSubCategory(category: FarmerAssetCategory, sub: string | null): string {
   if (!sub) return "";
   if (category === "machinery") {
@@ -260,6 +336,9 @@ export function formatAssetSubCategory(category: FarmerAssetCategory, sub: strin
   }
   if (category === "facility") {
     return FACILITY_SUB_CATEGORY_LABELS[sub as FacilitySubCategory] ?? sub;
+  }
+  if (category === "livestock") {
+    return LIVESTOCK_SUB_CATEGORY_LABELS[sub as LivestockSubCategory] ?? sub;
   }
   return sub;
 }
@@ -387,14 +466,34 @@ export function normalizeCommodity(raw: unknown, sub_category?: string): AgriRec
   return "High Value Crops";
 }
 
-/** Production total for a record: fish count for Fishery, 40kg bags for crops. */
+/**
+ * Production output for a record — only `harvested` rows contribute.
+ * Fishery returns piece count; crops return 40kg bag count.
+ * Non-finalized or `total_loss` rows return 0 by design.
+ */
 export function productionOutputForRecord(r: AgriRecord): number {
+  if (r.lifecycle_status !== "harvested") return 0;
   if (r.commodity === "Fishery") {
     const fish = numField(r.harvesting_fishery);
     if (fish > 0) return fish;
     return numField(r.harvesting_output_bags);
   }
   return numField(r.harvesting_output_bags);
+}
+
+/**
+ * Damaged hectares for a record:
+ * - planted        → 0 (no damage finalized yet)
+ * - damaged        → pests + calamity (whatever was logged so far)
+ * - harvested      → pests + calamity (residual mid-season damage on a row that still got a harvest)
+ * - total_loss     → entire planting area (whole field was lost)
+ * Fishery has no hectare-based damage, so this returns 0 for fishery rows.
+ */
+export function damageHectaresForRecord(r: AgriRecord): number {
+  if (r.commodity === "Fishery") return 0;
+  if (r.lifecycle_status === "planted") return 0;
+  if (r.lifecycle_status === "total_loss") return numField(r.planting_area_hectares);
+  return numField(r.damage_pests_hectares) + numField(r.damage_calamity_hectares);
 }
 
 export const COMMODITY_COLORS: Record<string, string> = {

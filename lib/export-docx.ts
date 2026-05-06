@@ -563,7 +563,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
                   dataCell(r.sub_category),
                   numCell(r.total_farmers),
                   numCell(r.commodity === "Fishery" ? "—" : r.planting_area_hectares.toFixed(2)),
-                  numCell(r.commodity === "Fishery" ? `${productionOutputForRecord(r)} (fish)` : r.harvesting_output_bags.toLocaleString()),
+                  numCell(r.commodity === "Fishery" ? `${productionOutputForRecord(r)} pcs` : r.harvesting_output_bags.toLocaleString()),
                   numCell(dmg > 0 ? dmg.toFixed(2) : "—"),
                 ],
               });

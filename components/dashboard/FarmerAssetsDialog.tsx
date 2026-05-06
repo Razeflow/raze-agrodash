@@ -88,7 +88,10 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
   async function handleAdd() {
     setErrorMsg(null);
     const sub = newItem.sub_category.trim();
-    const needsSub = newItem.category === "machinery" || newItem.category === "facility";
+    const needsSub =
+      newItem.category === "machinery" ||
+      newItem.category === "facility" ||
+      newItem.category === "livestock";
     if (needsSub && !sub) {
       setErrorMsg("Please choose a sub-category.");
       return;
@@ -115,7 +118,10 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
     if (!editingId || !editDraft) return;
     setErrorMsg(null);
     const sub = editDraft.sub_category.trim();
-    const needsSub = editDraft.category === "machinery" || editDraft.category === "facility";
+    const needsSub =
+      editDraft.category === "machinery" ||
+      editDraft.category === "facility" ||
+      editDraft.category === "livestock";
     if (needsSub && !sub) {
       setErrorMsg("Please choose a sub-category.");
       return;
@@ -213,7 +219,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
             className={inputCls}
             value={d.unit}
             onChange={(e) => set({ ...d, unit: e.target.value })}
-            placeholder="pcs, units…"
+            placeholder={d.category === "livestock" ? "head, pcs…" : "pcs, units…"}
           />
         </div>
         {showArea && (
@@ -266,7 +272,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
               </button>
             </div>
             <p className="mb-4 text-xs text-slate-500">
-              {f.name} · {f.barangay} — Track planting area, machinery, fishpond, and facilities owned by this farmer.
+              {f.name} · {f.barangay} — Track planting area, machinery, fishpond, facilities, and livestock owned by this farmer.
             </p>
             {errorMsg && (
               <div className="mb-4 rounded-2xl bg-red-50/70 border border-red-200/50 px-4 py-2.5 text-sm font-medium text-red-700 flex items-center gap-2">

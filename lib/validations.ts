@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CALAMITY_SUB_CATEGORIES, COMMODITY_OPTIONS, BARANGAYS } from "./data";
+import { CALAMITY_SUB_CATEGORIES, COMMODITY_OPTIONS, BARANGAYS, LIFECYCLE_STATUSES } from "./data";
 
 /**
  * Sanity bounds for numeric record fields. These mirror the Postgres CHECK
@@ -35,6 +35,10 @@ const bags = (label: string, max = RECORD_LIMITS.BAGS_MAX) =>
 const BARANGAY_VALUES = [...BARANGAYS] as [string, ...string[]];
 const COMMODITY_VALUES = [...COMMODITY_OPTIONS] as [string, ...string[]];
 const CALAMITY_VALUES = [...CALAMITY_SUB_CATEGORIES] as [string, ...string[]];
+const LIFECYCLE_VALUES = [...LIFECYCLE_STATUSES] as [string, ...string[]];
+
+// Floating-point slack for area sums (avoid 4.99999 > 5.00 false positives).
+const FP_EPS = 1e-6;
 
 /**
  * Schema for the data submitted from `RecordFormDialog`.
@@ -69,13 +73,14 @@ export const recordFormSchema = z
     calamity: z.string().max(500, "Calamity notes too long"),
     calamity_sub_category: z.enum(CALAMITY_VALUES),
     remarks: z.string().max(2_000, "Remarks too long"),
+    lifecycle_status: z.enum(LIFECYCLE_VALUES, { error: "Pick a lifecycle status" }),
   })
   .superRefine((val, ctx) => {
     // Cross-field: damage cannot exceed planting area (skip for Fishery — those
     // fields are reset to 0 anyway, but the check naturally passes for 0+0<=0).
     if (val.commodity !== "Fishery") {
       const totalDamage = val.damage_pests_hectares + val.damage_calamity_hectares;
-      if (totalDamage > val.planting_area_hectares) {
+      if (totalDamage > val.planting_area_hectares + FP_EPS) {
         ctx.addIssue({
           code: "custom",
           path: ["damage_calamity_hectares"],
@@ -90,6 +95,85 @@ export const recordFormSchema = z
         path: ["calamity"],
         message: `Describe the ${val.calamity_sub_category.toLowerCase()} event (or set type to None)`,
       });
+    }
+
+    // ── Lifecycle consistency: status is the contract; numbers are evidence.
+    const isFishery = val.commodity === "Fishery";
+    const harvest = isFishery ? val.harvesting_fishery : val.harvesting_output_bags;
+    const totalDamage = isFishery
+      ? 0
+      : val.damage_pests_hectares + val.damage_calamity_hectares;
+    const baseSize = isFishery ? val.stocking : val.planting_area_hectares;
+
+    // Every record needs a non-zero base size, regardless of status.
+    if (baseSize <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: [isFishery ? "stocking" : "planting_area_hectares"],
+        message: isFishery
+          ? "Stocking is required"
+          : "Planting area is required",
+      });
+    }
+
+    switch (val.lifecycle_status) {
+      case "planted":
+        if (harvest > 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
+            message: "Cannot record a harvest while status is 'Planted' — switch to 'Harvested'",
+          });
+        }
+        if (totalDamage > 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["damage_pests_hectares"],
+            message: "Damage logged while status is 'Planted' — switch to 'Damaged'",
+          });
+        }
+        break;
+      case "damaged":
+        if (totalDamage <= 0 && !isFishery) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["damage_pests_hectares"],
+            message: "'Damaged' status needs at least one damage value > 0",
+          });
+        }
+        if (harvest > 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
+            message: "Harvest set on a 'Damaged' row — switch to 'Harvested' to finalize",
+          });
+        }
+        break;
+      case "harvested":
+        if (harvest <= 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
+            message: "'Harvested' status requires a harvest value > 0",
+          });
+        }
+        break;
+      case "total_loss":
+        if (harvest > 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
+            message: "'Total loss' must have zero harvest",
+          });
+        }
+        if (!isFishery && totalDamage <= 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["damage_calamity_hectares"],
+            message: "'Total loss' requires damage to be logged",
+          });
+        }
+        break;
     }
   });
 

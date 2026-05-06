@@ -10,7 +10,10 @@ import {
   MONTH_NAMES,
   CALAMITY_SUB_CATEGORIES,
   CALAMITY_SUB_CATEGORY_LABELS,
+  LIFECYCLE_STATUSES,
+  LIFECYCLE_STATUS_LABELS,
   type CalamitySubCategory,
+  type LifecycleStatus,
 } from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
@@ -40,6 +43,7 @@ type FormErrors = {
   harvesting_fishery?: string;
   calamity?: string;
   remarks?: string;
+  lifecycle_status?: string;
 };
 
 function getEmptyForm() {
@@ -61,6 +65,7 @@ function getEmptyForm() {
     calamity: "None",
     calamity_sub_category: "None" as CalamitySubCategory,
     remarks: "",
+    lifecycle_status: "planted" as LifecycleStatus,
   };
 }
 
@@ -101,6 +106,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           calamity: initialData.calamity,
           calamity_sub_category: initialData.calamity_sub_category ?? "None",
           remarks: initialData.remarks,
+          lifecycle_status: initialData.lifecycle_status ?? "planted",
         });
       } else {
         const empty = getEmptyForm();
@@ -286,6 +292,33 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
               </div>
             </div>
 
+            {/* Lifecycle status */}
+            <div>
+              <label className={labelCls}>Lifecycle stage <span className="text-red-400">*</span></label>
+              <select
+                className={errors.lifecycle_status ? inputErrCls : inputCls}
+                value={form.lifecycle_status}
+                onChange={(e) => {
+                  const next = e.target.value as LifecycleStatus;
+                  setForm((f) => ({ ...f, lifecycle_status: next }));
+                  if (submitted) setErrors((er) => ({ ...er, lifecycle_status: undefined }));
+                }}
+              >
+                {LIFECYCLE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {LIFECYCLE_STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">
+                {form.lifecycle_status === "planted" && "Initial input — area/stocking only. Damage and harvest stay at 0."}
+                {form.lifecycle_status === "damaged" && "Mid-season damage logged. Harvest must remain 0 until the row is finalized."}
+                {form.lifecycle_status === "harvested" && "Final harvest captured. Only this status counts toward production totals."}
+                {form.lifecycle_status === "total_loss" && "Finalized with no harvest. The full planting area counts as damage."}
+              </p>
+              {errors.lifecycle_status && <p className={errTextCls}><AlertCircle size={11} /> {errors.lifecycle_status}</p>}
+            </div>
+
             {/* Variety */}
             {!isCorn && subTypes.length > 0 && (
               <div>
@@ -407,7 +440,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                   {errors.stocking && <p className={errTextCls}><AlertCircle size={11} /> {errors.stocking}</p>}
                 </div>
                 <div>
-                  <label className={labelCls}>Harvesting (Fishery)</label>
+                  <label className={labelCls}>Harvesting (pieces)</label>
                   <input
                     type="number"
                     min={0}

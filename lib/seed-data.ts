@@ -169,6 +169,8 @@ export function generateRecords(barangay: string, farmerPool: Farmer[], targetCo
         remarks: "",
         period_month: new Date(ts).getMonth() + 1,
         period_year: new Date(ts).getFullYear(),
+        // Seed data is "fully realized" — every row has a harvest, so mark them harvested.
+        lifecycle_status: "harvested",
         created_at: ts,
         updated_at: ts,
       });
