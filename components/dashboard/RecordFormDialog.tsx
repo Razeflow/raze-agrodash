@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, Users, CheckCircle2, AlertCircle } from "lucide-react";
 import type { AgriRecord } from "@/lib/data";
 import {
@@ -21,6 +21,7 @@ import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
 import FarmerSelectDialog from "./FarmerSelectDialog";
 import { recordFormSchema, RECORD_LIMITS, zodIssuesToErrors } from "@/lib/validations";
+import { sortBy } from "@/lib/sort";
 
 type Props = {
   open: boolean;
@@ -73,7 +74,10 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
   const { addRecord, updateRecord, getFarmersByIds } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
   const { mounted, visible } = useAnimatedMount(open);
-  const availableBarangays = isBarangayUser && userBarangay ? [userBarangay] : BARANGAYS;
+  const availableBarangays = useMemo(() => {
+    if (isBarangayUser && userBarangay) return [userBarangay];
+    return sortBy([...BARANGAYS], (b) => b);
+  }, [isBarangayUser, userBarangay]);
   const [form, setForm] = useState(getEmptyForm());
   const [farmerSelectOpen, setFarmerSelectOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);

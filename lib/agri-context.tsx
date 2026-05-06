@@ -27,6 +27,8 @@ import {
 } from "./data";
 import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
+import { sortBy } from "./sort";
+import { fullNameSortKey, lastNameSortKey } from "./name";
 
 /**
  * Translate raw Supabase / Postgres errors into user-friendly messages.
@@ -425,21 +427,22 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     () => (isBarangayUser && userBarangay ? records.filter((r) => r.barangay === userBarangay) : records),
     [records, isBarangayUser, userBarangay],
   );
-  const vf = useMemo(
-    () => (isBarangayUser && userBarangay ? farmers.filter((f) => f.barangay === userBarangay) : farmers),
-    [farmers, isBarangayUser, userBarangay],
-  );
+  const vf = useMemo(() => {
+    const visible = isBarangayUser && userBarangay ? farmers.filter((f) => f.barangay === userBarangay) : farmers;
+    return sortBy(visible, (f) => lastNameSortKey(f.name) || fullNameSortKey(f.name));
+  }, [farmers, isBarangayUser, userBarangay]);
 
-  const vh = useMemo(
-    () => (isBarangayUser && userBarangay ? households.filter((h) => h.barangay === userBarangay) : households),
-    [households, isBarangayUser, userBarangay],
-  );
+  const vh = useMemo(() => {
+    const visible = isBarangayUser && userBarangay ? households.filter((h) => h.barangay === userBarangay) : households;
+    return sortBy(visible, (h) => h.display_name?.trim() || h.id);
+  }, [households, isBarangayUser, userBarangay]);
 
   const vo = useMemo(() => {
-    if (isBarangayUser && userBarangay) {
-      return organizations.filter((o) => !o.barangay || o.barangay === userBarangay);
-    }
-    return organizations;
+    const visible =
+      isBarangayUser && userBarangay
+        ? organizations.filter((o) => !o.barangay || o.barangay === userBarangay)
+        : organizations;
+    return sortBy(visible, (o) => o.name);
   }, [organizations, isBarangayUser, userBarangay]);
 
   const vSubs = useMemo(() => {
@@ -461,12 +464,15 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         counts.set(organization_id, (counts.get(organization_id) || 0) + 1);
       }
     });
-    return vo.map((org) => ({
+    return sortBy(
+      vo.map((org) => ({
       id: org.id,
       name: org.name,
       org_type: org.org_type,
       memberCount: counts.get(org.id) || 0,
-    }));
+      })),
+      (o) => o.name,
+    );
   }, [farmerOrganizations, vfIds, vo]);
 
   const uniqueFarmersInOrganizations = useMemo(() => {
@@ -914,7 +920,12 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   const farmersByBarangay = useMemo(() => {
     const map: Record<string, Farmer[]> = {};
     BARANGAYS.forEach((b) => { map[b] = []; });
-    vf.forEach((f) => { if (map[f.barangay]) map[f.barangay].push(f); });
+    vf.forEach((f) => {
+      if (map[f.barangay]) map[f.barangay].push(f);
+    });
+    BARANGAYS.forEach((b) => {
+      map[b] = sortBy(map[b], (f) => lastNameSortKey(f.name) || fullNameSortKey(f.name));
+    });
     return map;
   }, [vf]);
 

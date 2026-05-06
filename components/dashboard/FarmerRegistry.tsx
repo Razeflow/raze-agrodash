@@ -1,8 +1,9 @@
 "use client";
-import { useState, useMemo, useEffect } from "react";
+import { useRef, useState, useMemo, useEffect } from "react";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import { BARANGAYS, formatPeriod, ORG_TYPE_LABELS, formatHouseholdSubsidySummary, formatFarmerAssetSummary } from "@/lib/data";
+import { sortBy, compareAZ } from "@/lib/sort";
 import type { Farmer, Household } from "@/lib/data";
 import {
   Search, UserPlus, Pencil, Trash2, MapPin, Users, X,
@@ -15,6 +16,7 @@ import FarmerAssetsDialog from "./FarmerAssetsDialog";
 import BentoCard from "@/components/ui/BentoCard";
 import DialogPortal from "@/components/ui/DialogPortal";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import { displayNameParts, fullNameSortKey, lastNameSortKey } from "@/lib/name";
 
 function farmerAge(birthDate: string | null): string {
   if (!birthDate) return "—";
@@ -62,6 +64,8 @@ export default function FarmerRegistry() {
   const [householdBrowseOpen, setHouseholdBrowseOpen] = useState(false);
   const [assetsFarmer, setAssetsFarmer] = useState<Farmer | null>(null);
   const [registryError, setRegistryError] = useState<string | null>(null);
+  const [openedFromOrgId, setOpenedFromOrgId] = useState<string | null>(null);
+  const deepLinkHandledRef = useRef(false);
 
   // ── Animated mount for inline modals ──
   const brgyModal = useAnimatedMount(!!activeBarangay);
@@ -81,10 +85,24 @@ export default function FarmerRegistry() {
     return () => window.removeEventListener("keydown", onKey);
   }, [deleteOpen, formOpen, selectedFarmer, activeBarangay]);
 
+  // ── Deep-link support: ?tab=farmers&farmerId=...(&orgId=...) ──
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const farmerId = params.get("farmerId");
+    if (!farmerId) return;
+    const f = farmers.find((x) => x.id === farmerId);
+    if (!f) return;
+    deepLinkHandledRef.current = true;
+    setOpenedFromOrgId(params.get("orgId"));
+    setActiveBarangay(f.barangay);
+    setSelectedFarmer(f);
+  }, [farmers]);
+
   // ── Derived data ──
   const barangayList = useMemo(() => {
     if (isBarangayUser && userBarangay) return [userBarangay];
-    return [...BARANGAYS];
+    return sortBy([...BARANGAYS], (b) => b);
   }, [isBarangayUser, userBarangay]);
 
   const filteredByBarangay = useMemo(() => {
@@ -150,10 +168,20 @@ export default function FarmerRegistry() {
     const householdIds = [...byH.keys()].sort((a, b) => {
       const na = getHousehold(a)?.display_name || a;
       const nb = getHousehold(b)?.display_name || b;
-      return na.localeCompare(nb);
+      return compareAZ(na, nb);
     });
     return { byH, householdIds, noH };
   }, [modalFarmers, getHousehold]);
+
+  function renderStackedName(name: string) {
+    const np = displayNameParts(name);
+    return (
+      <span className="min-w-0">
+        <span className="block text-sm font-black text-slate-800 truncate">{np.last || name}</span>
+        <span className="block text-[11px] font-semibold text-slate-600 truncate">{np.firstMiddle || "—"}</span>
+      </span>
+    );
+  }
 
   async function moveOutOfHousehold(f: Farmer) {
     setRegistryError(null);
@@ -347,6 +375,7 @@ export default function FarmerRegistry() {
                   {(() => {
                     const hh = selectedFarmer.household_id ? getHousehold(selectedFarmer.household_id) : undefined;
                     const orgIds = getOrganizationIdsForFarmer(selectedFarmer.id);
+                    const openedFromOrg = openedFromOrgId ? organizations.find((o) => o.id === openedFromOrgId) : undefined;
                     const orgNames = orgIds
                       .map((id) => organizations.find((o) => o.id === id))
                       .filter(Boolean)
@@ -371,7 +400,7 @@ export default function FarmerRegistry() {
                               {selectedFarmer.name.charAt(0).toUpperCase()}
                             </div>
                           )}
-                          <h4 className="text-lg font-bold text-slate-800">{selectedFarmer.name}</h4>
+                          <div className="text-center">{renderStackedName(selectedFarmer.name)}</div>
                           <span
                             className={`inline-flex items-center rounded-[1rem] px-2.5 py-0.5 text-[11px] font-semibold ${
                               selectedFarmer.gender === "Male" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-500"
@@ -450,7 +479,7 @@ export default function FarmerRegistry() {
                                 .sort(
                                   (a, b) =>
                                     Number(b.is_household_head) - Number(a.is_household_head) ||
-                                    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+                                    compareAZ(lastNameSortKey(a.name) || fullNameSortKey(a.name), lastNameSortKey(b.name) || fullNameSortKey(b.name)),
                                 );
                               if (members.length === 0) return null;
                               return (
@@ -490,6 +519,11 @@ export default function FarmerRegistry() {
                             <Building2 size={12} className="text-slate-400" />
                             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Organizations</p>
                           </div>
+                          {openedFromOrg ? (
+                            <p className="text-[11px] font-bold text-emerald-700">
+                              Opened from: {openedFromOrg.name} ({ORG_TYPE_LABELS[openedFromOrg.org_type]})
+                            </p>
+                          ) : null}
                           <p className="text-sm text-slate-700">{orgNames || "—"}</p>
                         </div>
 
@@ -629,7 +663,7 @@ export default function FarmerRegistry() {
                                     </div>
                                   )}
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-semibold text-slate-800 truncate">{f.name}</p>
+                                    {renderStackedName(f.name)}
                                     <div className="flex flex-wrap items-center gap-2 mt-0.5">
                                       <span className={`inline-flex items-center rounded-[1rem] px-1.5 py-0 text-[10px] font-semibold ${
                                         f.gender === "Male" ? "bg-blue-50 text-blue-500" : "bg-pink-50 text-pink-400"
@@ -674,7 +708,7 @@ export default function FarmerRegistry() {
                                   </div>
                                 )}
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-semibold text-slate-800 truncate">{f.name}</p>
+                                  {renderStackedName(f.name)}
                                   <p className="text-[10px] text-amber-700 mt-0.5">Assign household via Edit</p>
                                 </div>
                                 <ChevronRight size={16} className="shrink-0 text-slate-300 group-hover:text-emerald-500 transition" />

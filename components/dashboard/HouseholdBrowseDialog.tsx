@@ -1,10 +1,13 @@
 "use client";
 
-import { X, HandCoins, ChevronRight } from "lucide-react";
+import { useMemo, useState } from "react";
+import { X, HandCoins, ChevronRight, Search } from "lucide-react";
 import type { Farmer, Household, HouseholdSubsidy } from "@/lib/data";
 import { formatHouseholdSubsidySummary } from "@/lib/data";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
+import { sortBy } from "@/lib/sort";
+import { normalizeSortKey } from "@/lib/sort";
 
 type Props = {
   open: boolean;
@@ -24,12 +27,31 @@ export default function HouseholdBrowseDialog({
   onEditHousehold,
 }: Props) {
   const { mounted, visible } = useAnimatedMount(open);
+  const [search, setSearch] = useState("");
 
   if (!mounted) return null;
 
-  const sorted = [...households].sort((a, b) =>
-    (a.display_name || "").localeCompare(b.display_name || "", undefined, { sensitivity: "base" }),
-  );
+  const filteredSorted = useMemo(() => {
+    const q = normalizeSortKey(search);
+    const filtered = !q
+      ? households
+      : households.filter((h) => {
+          const subs = getSubsidiesForHousehold(h.id);
+          const summary = formatHouseholdSubsidySummary(subs);
+          const members = farmers.filter((f) => f.household_id === h.id);
+          const hay = [
+            h.display_name,
+            h.barangay,
+            summary,
+            h.rffa_subsidies_notes,
+            members.map((m) => m.name).join(" "),
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return normalizeSortKey(hay).includes(q);
+        });
+    return sortBy(filtered, (h) => h.display_name?.trim() || h.id);
+  }, [households, farmers, getSubsidiesForHousehold, search]);
 
   return (
     <DialogPortal>
@@ -53,11 +75,22 @@ export default function HouseholdBrowseDialog({
                 <X size={18} className="text-slate-400" />
               </button>
             </div>
+            <div className="shrink-0 px-6 pt-4">
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="h-9 w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur pl-8 pr-3 text-xs text-slate-700 placeholder-slate-400 outline-none focus:border-emerald-400 focus:bg-white transition"
+                  placeholder="Search household, barangay, member, subsidy item..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-              {sorted.length === 0 ? (
+              {filteredSorted.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">No households in your scope yet.</p>
               ) : (
-                sorted.map((h) => {
+                filteredSorted.map((h) => {
                   const subs = getSubsidiesForHousehold(h.id);
                   const members = farmers.filter((f) => f.household_id === h.id);
                   const summary = formatHouseholdSubsidySummary(subs);

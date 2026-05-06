@@ -12,6 +12,7 @@ import {
 import { useAgriData } from "@/lib/agri-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 type Props = {
   open: boolean;
@@ -67,6 +68,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Draft | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [deleteAssetId, setDeleteAssetId] = useState<string | null>(null);
 
   const assets = useMemo(
     () => (farmer ? getAssetsForFarmer(farmer.id) : []),
@@ -258,13 +260,14 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
   };
 
   return (
-    <DialogPortal>
-      <div className="fixed inset-0 lg:left-24 z-[65] overflow-y-auto">
-        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
-        <div className="flex min-h-full items-center justify-center p-4">
-          <div
-            className={`relative z-10 w-full max-w-lg max-h-[min(92vh,900px)] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
-          >
+    <>
+      <DialogPortal>
+        <div className="fixed inset-0 lg:left-24 z-[65] overflow-y-auto">
+          <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div
+              className={`relative z-10 w-full max-w-lg max-h-[min(92vh,900px)] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
+            >
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-800">Farmer assets</h2>
               <button type="button" onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
@@ -329,7 +332,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => void handleDelete(a.id)}
+                              onClick={() => setDeleteAssetId(a.id)}
                               className="rounded-lg p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"
                               aria-label="Delete asset"
                             >
@@ -365,9 +368,28 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
                 Close
               </button>
             </div>
+            </div>
           </div>
         </div>
-      </div>
-    </DialogPortal>
+      </DialogPortal>
+
+      <ConfirmDialog
+        open={!!deleteAssetId}
+        onClose={() => setDeleteAssetId(null)}
+        title="Delete asset line"
+        description="Are you sure you want to delete this asset line item? This action cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={async () => {
+          if (!deleteAssetId) return false;
+          setErrorMsg(null);
+          const res = await deleteFarmerAsset(deleteAssetId);
+          if (!res.ok) {
+            setErrorMsg(res.message);
+            return false;
+          }
+        }}
+      />
+    </>
   );
 }

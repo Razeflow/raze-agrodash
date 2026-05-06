@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import LoginPage from "@/components/LoginPage";
@@ -18,6 +18,7 @@ import PasswordChangeDialog from "@/components/dashboard/PasswordChangeDialog";
 import UserManagement from "@/components/dashboard/UserManagement";
 import ProgramsView from "@/components/dashboard/ProgramsView";
 import { BARANGAYS } from "@/lib/data";
+import { sortBy } from "@/lib/sort";
 import {
   Sprout, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList,
   LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins, Calendar, Printer,
@@ -86,6 +87,32 @@ export default function Page() {
     };
   }, [isLoggedIn]);
 
+  const sortedBarangays = useMemo(() => sortBy([...BARANGAYS], (b) => b), []);
+
+  const allowedTabs = useMemo(() => new Set(ALL_TABS.map((t) => t.id)), []);
+
+  useEffect(() => {
+    function applyUrlTab() {
+      const params = new URLSearchParams(window.location.search);
+      const urlTab = params.get("tab");
+      if (urlTab && allowedTabs.has(urlTab)) setTab(urlTab);
+    }
+    applyUrlTab();
+    window.addEventListener("popstate", applyUrlTab);
+    return () => window.removeEventListener("popstate", applyUrlTab);
+  }, [allowedTabs]);
+
+  function pushUrlTab(nextTab: string) {
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", nextTab);
+    if (nextTab !== "farmers") {
+      params.delete("farmerId");
+      params.delete("orgId");
+    }
+    const nextUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.pushState({}, "", nextUrl);
+  }
+
   if (!isLoggedIn) return <LoginPage />;
 
   const tabs = ALL_TABS.filter((t) => {
@@ -130,7 +157,11 @@ export default function Page() {
           {tabs.map((t) => (
             <div key={t.id} className="relative group/item flex items-center">
               <button
-                onClick={() => { setTab(t.id); setMenuOpen(false); }}
+                onClick={() => {
+                  setTab(t.id);
+                  pushUrlTab(t.id);
+                  setMenuOpen(false);
+                }}
                 className={`w-full flex items-center gap-4 px-4 py-4 rounded-[1.5rem] transition-all duration-300 font-bold ${
                   tab === t.id
                     ? "bg-slate-950 text-white shadow-2xl shadow-slate-300"
@@ -252,7 +283,11 @@ export default function Page() {
                     onChange={(e) => setOverviewBarangay(e.target.value)}
                   >
                     <option value="All">All Barangays</option>
-                    {BARANGAYS.map((b) => <option key={b} value={b}>{b}</option>)}
+                    {sortedBarangays.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
                   </select>
                   {overviewBarangay !== "All" && (
                     <button

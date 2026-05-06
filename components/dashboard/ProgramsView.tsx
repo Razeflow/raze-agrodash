@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { HandCoins, Building2, Plus, Trash2, Users } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
@@ -9,8 +9,11 @@ import BentoCard from "@/components/ui/BentoCard";
 import StatStrip from "@/components/ui/StatStrip";
 import HouseholdEditDialog from "./HouseholdEditDialog";
 import OrganizationCreatedDialog from "./OrganizationCreatedDialog";
+import OrganizationMembersDialog from "./OrganizationMembersDialog";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 const ORG_TYPES: OrgType[] = ["cooperative", "association", "household_group", "other"];
+const PER_PAGE_OPTIONS = [10, 25, 50] as const;
 
 export default function ProgramsView() {
   const {
@@ -30,12 +33,43 @@ export default function ProgramsView() {
   const [orgCreated, setOrgCreated] = useState<{ name: string; org_type: OrgType; memberCount: number } | null>(null);
   const [orgError, setOrgError] = useState<string | null>(null);
   const [deleteOrgError, setDeleteOrgError] = useState<string | null>(null);
+  const [membersOrgId, setMembersOrgId] = useState<string | null>(null);
+  const [deleteOrgTarget, setDeleteOrgTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const [hhPerPage, setHhPerPage] = useState<(typeof PER_PAGE_OPTIONS)[number]>(10);
+  const [hhPage, setHhPage] = useState(1);
+  const [orgPerPage, setOrgPerPage] = useState<(typeof PER_PAGE_OPTIONS)[number]>(10);
+  const [orgPage, setOrgPage] = useState(1);
 
   const subsidyLineCount = householdSubsidies.length;
   const householdsWithAssistance = useMemo(
     () => new Set(householdSubsidies.map((s) => s.household_id)).size,
     [householdSubsidies],
   );
+
+  const visibleHouseholds = households;
+  const visibleOrganizations = organizationStats;
+
+  const hhTotalPages = Math.max(1, Math.ceil(visibleHouseholds.length / hhPerPage));
+  const orgTotalPages = Math.max(1, Math.ceil(visibleOrganizations.length / orgPerPage));
+
+  useEffect(() => {
+    if (hhPage > hhTotalPages) setHhPage(hhTotalPages);
+  }, [hhPage, hhTotalPages]);
+
+  useEffect(() => {
+    if (orgPage > orgTotalPages) setOrgPage(orgTotalPages);
+  }, [orgPage, orgTotalPages]);
+
+  const pagedHouseholds = useMemo(() => {
+    const start = (hhPage - 1) * hhPerPage;
+    return visibleHouseholds.slice(start, start + hhPerPage);
+  }, [visibleHouseholds, hhPage, hhPerPage]);
+
+  const pagedOrganizations = useMemo(() => {
+    const start = (orgPage - 1) * orgPerPage;
+    return visibleOrganizations.slice(start, start + orgPerPage);
+  }, [visibleOrganizations, orgPage, orgPerPage]);
 
   async function handleAddOrg(e: React.FormEvent) {
     e.preventDefault();
@@ -84,6 +118,96 @@ export default function ProgramsView() {
     [households.length, subsidyLineCount, householdsWithAssistance, organizationStats.length, uniqueFarmersInOrganizations],
   );
 
+  function PaginationControls({
+    page,
+    totalPages,
+    perPage,
+    onPerPageChange,
+    onPageChange,
+    itemCount,
+    itemLabel,
+  }: {
+    page: number;
+    totalPages: number;
+    perPage: number;
+    onPerPageChange: (n: (typeof PER_PAGE_OPTIONS)[number]) => void;
+    onPageChange: (n: number) => void;
+    itemCount: number;
+    itemLabel: string;
+  }) {
+    const pages = useMemo(() => {
+      const maxButtons = 7;
+      if (totalPages <= maxButtons) return Array.from({ length: totalPages }, (_, i) => i + 1);
+      const clamped = Math.min(Math.max(page, 1), totalPages);
+      const start = Math.max(1, clamped - 2);
+      const end = Math.min(totalPages, start + 4);
+      const adjustedStart = Math.max(1, end - 4);
+      const core = Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
+      return [1, ...core.filter((p) => p !== 1 && p !== totalPages), totalPages].filter(
+        (p, i, a) => a.indexOf(p) === i,
+      );
+    }, [page, totalPages]);
+
+    return (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Per page</span>
+          <select
+            className="h-8 rounded-[1.25rem] border border-slate-200/50 bg-white/60 px-3 text-xs font-bold text-slate-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+            value={perPage}
+            onChange={(e) => {
+              onPerPageChange(Number(e.target.value) as (typeof PER_PAGE_OPTIONS)[number]);
+              onPageChange(1);
+            }}
+          >
+            {PER_PAGE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-slate-500">
+            {itemCount} {itemLabel}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page <= 1}
+            className="h-8 rounded-[1.25rem] border border-slate-200/50 bg-white/60 px-3 text-xs font-bold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white transition"
+          >
+            Prev
+          </button>
+          <div className="flex items-center gap-1">
+            {pages.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => onPageChange(p)}
+                className={`h-8 min-w-8 rounded-[1.25rem] px-3 text-xs font-black transition ${
+                  p === page ? "bg-slate-950 text-white" : "border border-slate-200/50 bg-white/60 text-slate-700 hover:bg-white"
+                }`}
+                aria-current={p === page ? "page" : undefined}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
+            className="h-8 rounded-[1.25rem] border border-slate-200/50 bg-white/60 px-3 text-xs font-bold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white transition"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fade-up delay-1 space-y-8">
       <BentoCard variant="compact">
@@ -109,11 +233,20 @@ export default function ProgramsView() {
         collapsible
         defaultExpanded
       >
+        <PaginationControls
+          page={hhPage}
+          totalPages={hhTotalPages}
+          perPage={hhPerPage}
+          onPerPageChange={setHhPerPage}
+          onPageChange={setHhPage}
+          itemCount={visibleHouseholds.length}
+          itemLabel={visibleHouseholds.length === 1 ? "household" : "households"}
+        />
         <div className="space-y-3">
-          {households.length === 0 ? (
+          {visibleHouseholds.length === 0 ? (
             <p className="text-sm text-slate-400">No households yet. Register a farmer to create one.</p>
           ) : (
-            households.map((h) => {
+            pagedHouseholds.map((h) => {
               const subs = getSubsidiesForHousehold(h.id);
               const catLabels = [...new Set(subs.map((s) => SUBSIDY_CATEGORY_LABELS[s.category]))];
               const subPreview =
@@ -195,11 +328,21 @@ export default function ProgramsView() {
           </form>
         )}
 
+        <PaginationControls
+          page={orgPage}
+          totalPages={orgTotalPages}
+          perPage={orgPerPage}
+          onPerPageChange={setOrgPerPage}
+          onPageChange={setOrgPage}
+          itemCount={visibleOrganizations.length}
+          itemLabel={visibleOrganizations.length === 1 ? "organization" : "organizations"}
+        />
+
         <div className="space-y-2">
-          {organizationStats.length === 0 ? (
+          {visibleOrganizations.length === 0 ? (
             <p className="text-sm text-slate-400">No organizations. Add one above.</p>
           ) : (
-            organizationStats.map((o) => (
+            pagedOrganizations.map((o) => (
               <div
                 key={o.id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/40 bg-white/50 px-4 py-3"
@@ -215,16 +358,19 @@ export default function ProgramsView() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">
-                    {o.memberCount} members
+                    <button
+                      type="button"
+                      onClick={() => setMembersOrgId(o.id)}
+                      className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800 hover:bg-emerald-200/70 transition"
+                      title="View members"
+                    >
+                      {o.memberCount} members
+                    </button>
                   </span>
                   {isAdminOrAbove && (
                     <button
                       type="button"
-                      onClick={async () => {
-                        setDeleteOrgError(null);
-                        const res = await deleteOrganization(o.id);
-                        if (!res.ok) setDeleteOrgError(res.message);
-                      }}
+                      onClick={() => setDeleteOrgTarget({ id: o.id, name: o.name })}
                       className="rounded-xl p-2 text-red-500 hover:bg-red-50 transition"
                       title="Delete organization"
                     >
@@ -245,6 +391,35 @@ export default function ProgramsView() {
         name={orgCreated?.name ?? ""}
         orgType={orgCreated?.org_type ?? "other"}
         memberCount={orgCreated?.memberCount ?? 0}
+      />
+
+      <OrganizationMembersDialog
+        open={!!membersOrgId}
+        onClose={() => setMembersOrgId(null)}
+        organizationId={membersOrgId}
+      />
+
+      <ConfirmDialog
+        open={!!deleteOrgTarget}
+        onClose={() => setDeleteOrgTarget(null)}
+        title="Delete organization"
+        description={
+          deleteOrgTarget
+            ? `This will remove "${deleteOrgTarget.name}" and unlink it from members and households. This action cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        danger
+        typeToConfirmText={deleteOrgTarget?.name ?? undefined}
+        onConfirm={async () => {
+          if (!deleteOrgTarget) return false;
+          setDeleteOrgError(null);
+          const res = await deleteOrganization(deleteOrgTarget.id);
+          if (!res.ok) {
+            setDeleteOrgError(res.message);
+            return false;
+          }
+        }}
       />
     </div>
   );

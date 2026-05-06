@@ -9,6 +9,8 @@ import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
 import { uploadFarmerPhoto } from "@/lib/farmer-photo";
 import { farmerFormSchema, zodIssuesToErrors } from "@/lib/validations";
+import { sortBy } from "@/lib/sort";
+import { combineNameParts, splitHumanName } from "@/lib/name";
 
 type Props = {
   open: boolean;
@@ -30,9 +32,14 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
   } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
   const { mounted, visible } = useAnimatedMount(open);
-  const availableBarangays = isBarangayUser && userBarangay ? [userBarangay] : BARANGAYS;
+  const availableBarangays = useMemo(() => {
+    if (isBarangayUser && userBarangay) return [userBarangay];
+    return sortBy([...BARANGAYS], (b) => b);
+  }, [isBarangayUser, userBarangay]);
 
-  const [name, setName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
   const [gender, setGender] = useState<"Male" | "Female">("Male");
   const [barangay, setBarangay] = useState<string>(isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]);
   const [householdId, setHouseholdId] = useState<string>("");
@@ -52,15 +59,15 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
   const [isHouseholdHead, setIsHouseholdHead] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const householdsInBarangay = useMemo(
-    () => households.filter((h) => h.barangay === barangay),
-    [households, barangay],
-  );
+  const householdsInBarangay = useMemo(() => {
+    const scoped = households.filter((h) => h.barangay === barangay);
+    return sortBy(scoped, (h) => h.display_name?.trim() || h.id);
+  }, [households, barangay]);
 
-  const orgsForBarangay = useMemo(
-    () => organizations.filter((o) => !o.barangay || o.barangay === barangay),
-    [organizations, barangay],
-  );
+  const orgsForBarangay = useMemo(() => {
+    const scoped = organizations.filter((o) => !o.barangay || o.barangay === barangay);
+    return sortBy(scoped, (o) => o.name);
+  }, [organizations, barangay]);
 
   useEffect(() => {
     if (open) {
@@ -72,7 +79,12 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
       setPhotoFile(null);
       setFieldErrors({});
       if (mode === "edit" && initialData) {
-        setName(initialData.name);
+        const split = splitHumanName(initialData.name);
+        const fm = split.firstMiddle.trim();
+        const fmParts = fm ? fm.split(" ") : [];
+        setLastName(split.last);
+        setFirstName(fmParts[0] || "");
+        setMiddleName(fmParts.slice(1).join(" "));
         setGender(initialData.gender);
         setBarangay(initialData.barangay);
         setHouseholdId(initialData.household_id || "");
@@ -84,7 +96,9 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
         setIsHouseholdHead(initialData.is_household_head);
         setNewHouseholdName("");
       } else {
-        setName("");
+        setLastName("");
+        setFirstName("");
+        setMiddleName("");
         setGender("Male");
         setBarangay(defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]));
         setHouseholdId("");
@@ -109,10 +123,12 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
     e.preventDefault();
     setErrorMsg(null);
 
+    const combinedName = combineNameParts(lastName, firstName, middleName);
+
     // Zod-driven validation. Inline messages keep the existing UX of
     // per-field hints; we still bail before hitting Supabase.
     const parsed = farmerFormSchema.safeParse({
-      name,
+      name: combinedName,
       gender,
       barangay,
       rsbsa_number: rsbsaNumber,
@@ -126,7 +142,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
     setFieldErrors({});
 
     const basePayload = {
-      name: name.trim(),
+      name: combinedName,
       gender,
       barangay,
       household_id: householdId || null,
@@ -172,7 +188,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
     }
 
     if (!forceAdd) {
-      const trimmed = name.trim().toLowerCase();
+      const trimmed = combinedName.trim().toLowerCase();
       const existing = (farmersByBarangay[barangay] || []).find((f) => f.name.trim().toLowerCase() === trimmed);
       if (existing) {
         setDupeWarning(existing.name);
@@ -216,7 +232,9 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
       setErrorMsg(null);
       setSuccessMsg("Farmer registered!");
       setAddCount((c) => c + 1);
-      setName("");
+      setLastName("");
+      setFirstName("");
+      setMiddleName("");
       setDupeWarning(null);
       setForceAdd(false);
       setPhotoFile(null);
@@ -313,20 +331,57 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
                 </div>
                 <div className="min-w-0 flex-1 space-y-3">
                   <div>
-                    <label className={labelCls}>Full Name</label>
-                    <input
-                      className={fieldErrors.name ? inputErrCls : inputCls}
-                      value={name}
-                      onChange={(e) => {
-                        setName(e.target.value);
-                        setDupeWarning(null);
-                        setForceAdd(false);
-                        if (fieldErrors.name) setFieldErrors((er) => ({ ...er, name: "" }));
-                      }}
-                      placeholder="e.g. Juan Dela Cruz"
-                      required
-                    />
+                    <label className={labelCls}>Name</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Last name</label>
+                        <input
+                          className={fieldErrors.name ? inputErrCls : inputCls}
+                          value={lastName}
+                          onChange={(e) => {
+                            setLastName(e.target.value);
+                            setDupeWarning(null);
+                            setForceAdd(false);
+                            if (fieldErrors.name) setFieldErrors((er) => ({ ...er, name: "" }));
+                          }}
+                          placeholder="e.g. Cruz"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">First name</label>
+                        <input
+                          className={fieldErrors.name ? inputErrCls : inputCls}
+                          value={firstName}
+                          onChange={(e) => {
+                            setFirstName(e.target.value);
+                            setDupeWarning(null);
+                            setForceAdd(false);
+                            if (fieldErrors.name) setFieldErrors((er) => ({ ...er, name: "" }));
+                          }}
+                          placeholder="e.g. Juan"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Middle name</label>
+                        <input
+                          className={fieldErrors.name ? inputErrCls : inputCls}
+                          value={middleName}
+                          onChange={(e) => {
+                            setMiddleName(e.target.value);
+                            setDupeWarning(null);
+                            setForceAdd(false);
+                            if (fieldErrors.name) setFieldErrors((er) => ({ ...er, name: "" }));
+                          }}
+                          placeholder="Optional"
+                        />
+                      </div>
+                    </div>
                     {fieldErrors.name && <p className={errTextCls}><AlertTriangle size={11} /> {fieldErrors.name}</p>}
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      Saved as a single full name internally: <span className="font-semibold text-slate-500">{combineNameParts(lastName, firstName, middleName) || "—"}</span>
+                    </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -395,7 +450,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
                     className={inputCls}
                     value={newHouseholdName}
                     onChange={(e) => setNewHouseholdName(e.target.value)}
-                    placeholder={`Defaults to "Household — ${name.trim() || "…"}" if empty`}
+                    placeholder={`Defaults to "Household — ${combineNameParts(lastName, firstName, middleName) || "…"}" if empty`}
                   />
                   <p className="mt-1 text-[10px] text-slate-400">The first person registered becomes household head.</p>
                 </div>

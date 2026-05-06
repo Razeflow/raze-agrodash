@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import type { Household, HouseholdSubsidy, SubsidyCategory } from "@/lib/data";
 import { ORG_TYPE_LABELS, SUBSIDY_CATEGORIES, SUBSIDY_CATEGORY_LABELS, formatHouseholdSubsidySummary } from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
+import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
+import { sortBy } from "@/lib/sort";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 type Props = {
   open: boolean;
@@ -37,12 +40,14 @@ const emptyNew = (): {
 export default function HouseholdEditDialog({ open, onClose, household }: Props) {
   const {
     updateHousehold,
+    deleteHousehold,
     organizations,
     getSubsidiesForHousehold,
     addHouseholdSubsidy,
     updateHouseholdSubsidy,
     deleteHouseholdSubsidy,
   } = useAgriData();
+  const { isAdminOrAbove } = useAuth();
   const { mounted, visible } = useAnimatedMount(open);
   const [displayName, setDisplayName] = useState("");
   const [farmingHa, setFarmingHa] = useState(0);
@@ -52,6 +57,8 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ReturnType<typeof emptyNew> | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [deleteSubsidyId, setDeleteSubsidyId] = useState<string | null>(null);
+  const [deleteHouseholdOpen, setDeleteHouseholdOpen] = useState(false);
 
   const subsidies = useMemo(
     () => (household ? getSubsidiesForHousehold(household.id) : []),
@@ -75,9 +82,10 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
 
   const hh = household;
 
-  const orgsInBarangay = organizations.filter(
-    (o) => !o.barangay || o.barangay === hh.barangay,
-  );
+  const orgsInBarangay = useMemo(() => {
+    const scoped = organizations.filter((o) => !o.barangay || o.barangay === hh.barangay);
+    return sortBy(scoped, (o) => o.name);
+  }, [organizations, hh.barangay]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -208,13 +216,14 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
   );
 
   return (
-    <DialogPortal>
-      <div className="fixed inset-0 lg:left-24 z-[65] overflow-y-auto">
-        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
-        <div className="flex min-h-full items-center justify-center p-4">
-          <div
-            className={`relative z-10 w-full max-w-lg max-h-[min(92vh,900px)] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
-          >
+    <>
+      <DialogPortal>
+        <div className="fixed inset-0 lg:left-24 z-[65] overflow-y-auto">
+          <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div
+              className={`relative z-10 w-full max-w-lg max-h-[min(92vh,900px)] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
+            >
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-800">Edit household and subsidies</h2>
               <button type="button" onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
@@ -316,7 +325,7 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
                               </button>
                               <button
                                 type="button"
-                                onClick={() => void handleDeleteSubsidy(s.id)}
+                                onClick={() => setDeleteSubsidyId(s.id)}
                                 className="rounded-lg p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-700"
                                 aria-label="Delete subsidy line"
                               >
@@ -344,6 +353,15 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
               </div>
 
               <div className="flex justify-end gap-3 pt-2">
+                {isAdminOrAbove && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteHouseholdOpen(true)}
+                    className="mr-auto rounded-[1.5rem] border border-red-200/60 bg-red-50/70 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100/80 transition"
+                  >
+                    Delete household
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onClose}
@@ -359,9 +377,44 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
                 </button>
               </div>
             </form>
+            </div>
           </div>
         </div>
-      </div>
-    </DialogPortal>
+      </DialogPortal>
+
+      <ConfirmDialog
+        open={!!deleteSubsidyId}
+        onClose={() => setDeleteSubsidyId(null)}
+        title="Delete assistance line"
+        description="Are you sure you want to delete this assistance line item? This action cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={async () => {
+          if (!deleteSubsidyId) return false;
+          setErrorMsg(null);
+          const res = await deleteHouseholdSubsidy(deleteSubsidyId);
+          if (!res.ok) {
+            setErrorMsg(res.message);
+            return false;
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteHouseholdOpen}
+        onClose={() => setDeleteHouseholdOpen(false)}
+        title="Delete household"
+        description={`Delete "${hh.display_name || "Unnamed household"}" in ${hh.barangay}? This will remove its subsidy/assistance lines and unlink farmers. This action cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        typeToConfirmText={(hh.display_name?.trim() || hh.id) ?? undefined}
+        onConfirm={async () => {
+          setErrorMsg(null);
+          await deleteHousehold(hh.id);
+          setDeleteHouseholdOpen(false);
+          onClose();
+        }}
+      />
+    </>
   );
 }
