@@ -292,7 +292,6 @@ export const LIVESTOCK_SUB_CATEGORY_LABELS: Record<LivestockSubCategory, string>
   rabbit: "Rabbit",
   others: "Others",
 };
-
 export type FarmerAsset = {
   id: string;
   farmer_id: string;
