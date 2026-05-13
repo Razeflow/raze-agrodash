@@ -18,319 +18,81 @@ import {
 } from "./data";
 import {
   BARANGAYS,
-  damageHectaresForRecord,
-  isActiveStatus,
   normalizeCalamitySubCategory,
   normalizeCommodity,
   numField,
-  productionOutputForRecord,
 } from "./data";
+import {
+  filterRecords,
+  getBarangaySummary,
+  recordGroup,
+} from "@/lib/domain/metrics";
+import {
+  MetricsContext,
+  MetricsProvider,
+  type MetricsContextValue,
+} from "@/lib/contexts/metrics-context";
+import {
+  ProgramsContext,
+  ProgramsProvider,
+  type ProgramsContextValue,
+  type AddOrganizationResult,
+  type AddHouseholdSubsidyResult,
+} from "@/lib/contexts/programs-context";
+import {
+  FarmersContext,
+  FarmersProvider,
+  type FarmersContextValue,
+  type AddFarmerInput,
+  type AddFarmerResult,
+  type AddFarmerAssetResult,
+} from "@/lib/contexts/farmers-context";
+import {
+  RecordsContext,
+  RecordsProvider,
+  type RecordsContextValue,
+  type AddRecordResult,
+} from "@/lib/contexts/records-context";
+import { commodityGroupForCommodity } from "@/lib/domain/commodity";
+import { isHistoricalOnly } from "@/lib/domain/lifecycle";
+import { validateHouseholdCropAllocation } from "@/lib/domain/allocation";
 import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
+import { friendlyDbError } from "./supabase/errors";
 import { sortBy } from "./sort";
 import { fullNameSortKey, lastNameSortKey } from "./name";
+import { agriRecordInsertRow, farmerInsertRow } from "./insert-rows";
+import {
+  normalizeAgriRecord,
+  normalizeFarmer,
+  normalizeFarmerAsset,
+  normalizeHouseholdSubsidy,
+} from "./normalize";
 
-/**
- * Translate raw Supabase / Postgres errors into user-friendly messages.
- * Most importantly converts CHECK constraint violations (code 23514) — which
- * surface as "new row for relation … violates check constraint …" — into a
- * sentence an LGU encoder can act on. Other errors fall back to the raw
- * message so we never silently lose information.
- */
-function friendlyDbError(error: { code?: string; message: string }): string {
-  if (error.code === "23514") {
-    const msg = error.message;
-    if (msg.includes("planting_area_sane")) return "Planting area is out of range — must be 0–10,000 ha.";
-    if (msg.includes("harvest_bags_sane")) return "Harvest output is out of range — must be 0–1,000,000 bags.";
-    if (msg.includes("pests_damage_sane") || msg.includes("calamity_damage_sane"))
-      return "Damage area is out of range — must be 0–10,000 ha.";
-    if (msg.includes("stocking_sane") || msg.includes("fishery_harvest_sane"))
-      return "Fishery value is out of range — must be 0–1,000,000.";
-    if (msg.includes("total_farmers_sane")) return "Farmer count is out of range — must be 0–10,000.";
-    if (msg.includes("period_month_valid")) return "Reporting month must be between 1 and 12.";
-    if (msg.includes("period_year_valid")) return "Reporting year must be between 2020 and 2100.";
-    if (msg.includes("lifecycle_status_valid")) return "Lifecycle status must be planted, damaged, harvested, or total_loss.";
-    return "One of the values failed a sanity check — please verify and try again.";
-  }
-  if (error.code === "23505") return "That record already exists (duplicate value).";
-  if (error.code === "23503") return "Referenced record was not found — please refresh and retry.";
-  if (error.code === "23502") return "A required field was missing.";
-  return error.message;
-}
-
-export type AddFarmerResult = { ok: true; id: string } | { ok: false; message: string };
-/** Optional display name when creating a new household from the farmer form (not stored on farmers row). */
-export type AddFarmerInput = Omit<Farmer, "id" | "created_at" | "updated_at"> & {
-  new_household_display_name?: string | null;
-};
-export type AddRecordResult = { ok: true } | { ok: false; message: string };
+// Phase 5 / step F: helper extractions
+//   - friendlyDbError      → lib/supabase/errors.ts
+//   - farmer / record builders → lib/insert-rows.ts
+//   - normalize / derive helpers → lib/normalize.ts
+//
+// Result types still re-export here for any legacy `import { ... } from "@/lib/agri-context"`
+// callers; new code should import from the specific context files directly.
+export type {
+  AddFarmerInput,
+  AddFarmerResult,
+  AddFarmerAssetResult,
+} from "@/lib/contexts/farmers-context";
+export type { AddRecordResult } from "@/lib/contexts/records-context";
+export type { AddOrganizationResult, AddHouseholdSubsidyResult } from "@/lib/contexts/programs-context";
 export type MutationResult = { ok: true } | { ok: false; message: string };
-export type AddOrganizationResult =
-  | { ok: true; organization: Organization }
-  | { ok: false; message: string };
-export type AddHouseholdSubsidyResult =
-  | { ok: true; subsidy: HouseholdSubsidy }
-  | { ok: false; message: string };
-export type AddFarmerAssetResult =
-  | { ok: true; asset: FarmerAsset }
-  | { ok: false; message: string };
-
-/* ── Supabase insert-row builders ─────────────────────────────────── */
-/** Columns on public.farmers (matches scripts/seed-supabase-bulk.ts). */
-function farmerInsertRow(f: Farmer) {
-  return {
-    id: f.id,
-    name: f.name,
-    gender: f.gender,
-    barangay: f.barangay,
-    household_id: f.household_id,
-    is_household_head: f.is_household_head,
-    rsbsa_number: f.rsbsa_number,
-    birth_date: f.birth_date,
-    civil_status: f.civil_status,
-    photo_url: f.photo_url,
-    created_at: f.created_at,
-    updated_at: f.updated_at,
-  };
-}
-
-/** Columns on public.agri_records (period_month/year added via migration 007). */
-function agriRecordInsertRow(r: AgriRecord) {
-  return {
-    id: r.id,
-    barangay: r.barangay,
-    commodity: r.commodity,
-    sub_category: r.sub_category,
-    farmer_ids: r.farmer_ids,
-    farmer_names: r.farmer_names,
-    farmer_male: r.farmer_male,
-    farmer_female: r.farmer_female,
-    total_farmers: r.total_farmers,
-    planting_area_hectares: r.planting_area_hectares,
-    harvesting_output_bags: r.harvesting_output_bags,
-    damage_pests_hectares: r.damage_pests_hectares,
-    damage_calamity_hectares: r.damage_calamity_hectares,
-    stocking: r.stocking,
-    harvesting_fishery: r.harvesting_fishery,
-    pests_diseases: r.pests_diseases,
-    calamity: r.calamity,
-    calamity_sub_category: r.calamity_sub_category,
-    remarks: r.remarks,
-    period_month: r.period_month,
-    period_year: r.period_year,
-    lifecycle_status: r.lifecycle_status,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-  };
-}
 
 /* ── context type ─────────────────────────────────────────────────── */
-
-type AgriContextValue = {
-  records: AgriRecord[];
-  addRecord: (
-    record: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">,
-  ) => Promise<AddRecordResult>;
-  updateRecord: (
-    id: string,
-    record: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">,
-  ) => Promise<MutationResult>;
-  deleteRecord: (id: string) => void;
-  farmers: Farmer[];
-  addFarmer: (farmer: AddFarmerInput) => Promise<AddFarmerResult>;
-  updateFarmer: (id: string, farmer: Omit<Farmer, "id" | "created_at" | "updated_at">) => Promise<MutationResult>;
-  deleteFarmer: (id: string) => Promise<void>;
-  getFarmersByIds: (ids: string[]) => Farmer[];
-  farmersByBarangay: Record<string, Farmer[]>;
-  households: Household[];
-  organizations: Organization[];
-  farmerOrganizations: FarmerOrganizationRow[];
-  getHousehold: (id: string | null) => Household | undefined;
-  addHousehold: (h: Omit<Household, "id" | "created_at" | "updated_at">) => Promise<Household | null>;
-  updateHousehold: (id: string, h: Partial<Omit<Household, "id" | "created_at" | "updated_at">>) => Promise<MutationResult>;
-  deleteHousehold: (id: string) => Promise<void>;
-  addOrganization: (o: Omit<Organization, "id" | "created_at" | "updated_at">) => Promise<AddOrganizationResult>;
-  updateOrganization: (id: string, o: Partial<Omit<Organization, "id" | "created_at" | "updated_at">>) => Promise<void>;
-  deleteOrganization: (id: string) => Promise<MutationResult>;
-  saveFarmerOrganizations: (farmerId: string, organizationIds: string[]) => Promise<MutationResult>;
-  householdSubsidies: HouseholdSubsidy[];
-  getSubsidiesForHousehold: (householdId: string) => HouseholdSubsidy[];
-  addHouseholdSubsidy: (row: {
-    household_id: string;
-    category: SubsidyCategory;
-    product_detail?: string | null;
-    quantity?: number | null;
-    unit?: string | null;
-    amount_php?: number | null;
-    program_source?: string | null;
-    received_date?: string | null;
-    notes?: string | null;
-  }) => Promise<AddHouseholdSubsidyResult>;
-  updateHouseholdSubsidy: (
-    id: string,
-    patch: Partial<{
-      category: SubsidyCategory;
-      product_detail: string | null;
-      quantity: number | null;
-      unit: string | null;
-      amount_php: number | null;
-      program_source: string | null;
-      received_date: string | null;
-      notes: string | null;
-    }>,
-  ) => Promise<MutationResult>;
-  deleteHouseholdSubsidy: (id: string) => Promise<MutationResult>;
-  farmerAssets: FarmerAsset[];
-  getAssetsForFarmer: (farmerId: string) => FarmerAsset[];
-  addFarmerAsset: (row: {
-    farmer_id: string;
-    category: FarmerAssetCategory;
-    sub_category?: string | null;
-    product_detail?: string | null;
-    quantity?: number | null;
-    unit?: string | null;
-    area_hectares?: number | null;
-    acquired_date?: string | null;
-    notes?: string | null;
-  }) => Promise<AddFarmerAssetResult>;
-  updateFarmerAsset: (
-    id: string,
-    patch: Partial<{
-      category: FarmerAssetCategory;
-      sub_category: string | null;
-      product_detail: string | null;
-      quantity: number | null;
-      unit: string | null;
-      area_hectares: number | null;
-      acquired_date: string | null;
-      notes: string | null;
-    }>,
-  ) => Promise<MutationResult>;
-  deleteFarmerAsset: (id: string) => Promise<MutationResult>;
-  getOrganizationIdsForFarmer: (farmerId: string) => string[];
-  organizationStats: { id: string; name: string; org_type: OrgType; memberCount: number }[];
-  uniqueFarmersInOrganizations: number;
-  totalFarmers: { male: number; female: number; total: number };
-  totalProduction: { bags: number; tons: number };
-  totalPlantingArea: number;
-  totalDamagedArea: number;
-  mostProducedCommodity: string;
-  productionByCommodity: { name: string; bags: number; tons: number }[];
-  productionBySubCategory: { name: string; commodity: string; bags: number; tons: number }[];
-  farmersByCommodity: { name: string; male: number; female: number; total: number }[];
-  damageRiskData: AgriRecord[];
-  damageByCommodity: { name: string; area: number }[];
-  damageByBarangay: Record<string, number>;
-  mostAffectedBarangay: string;
-  damagePercentage: number;
-  affectedFarmerCount: number;
-  damageTrend: "increasing" | "decreasing" | "stable";
-  recordsByDate: Record<string, AgriRecord[]>;
-  staleBarangays: { name: string; daysSinceUpdate: number | null; lastUpdate: string | null }[];
-};
-
-const AgriContext = createContext<AgriContextValue | null>(null);
+/* Phase 5: per-domain context types live in `lib/contexts/*-context.tsx`.
+   The orchestrator below builds three split value objects (Programs / Farmers
+   / Records) and hands each to the corresponding provider. The legacy
+   `useAgriData()` facade reads from all four contexts (those three +
+   MetricsContext) and merges them so existing consumers don't break. */
 
 const validBarangays = new Set<string>(BARANGAYS);
-
-function normalizeHouseholdSubsidy(row: Record<string, unknown>): HouseholdSubsidy {
-  const catRaw = String(row.category ?? "other");
-  const category: SubsidyCategory = isSubsidyCategory(catRaw) ? catRaw : "other";
-  return {
-    id: String(row.id),
-    household_id: String(row.household_id ?? ""),
-    category,
-    product_detail: row.product_detail != null ? String(row.product_detail) : null,
-    quantity: row.quantity != null && row.quantity !== "" ? Number(row.quantity) : null,
-    unit: row.unit != null ? String(row.unit) : null,
-    amount_php: row.amount_php != null && row.amount_php !== "" ? Number(row.amount_php) : null,
-    program_source: row.program_source != null ? String(row.program_source) : null,
-    received_date: row.received_date != null ? String(row.received_date).slice(0, 10) : null,
-    notes: row.notes != null ? String(row.notes) : null,
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
-  };
-}
-
-function normalizeFarmerAsset(row: Record<string, unknown>): FarmerAsset {
-  const catRaw = String(row.category ?? "planting_area");
-  const category: FarmerAssetCategory = isFarmerAssetCategory(catRaw) ? catRaw : "planting_area";
-  return {
-    id: String(row.id),
-    farmer_id: String(row.farmer_id ?? ""),
-    category,
-    sub_category: row.sub_category != null ? String(row.sub_category) : null,
-    product_detail: row.product_detail != null ? String(row.product_detail) : null,
-    quantity: row.quantity != null && row.quantity !== "" ? Number(row.quantity) : null,
-    unit: row.unit != null ? String(row.unit) : null,
-    area_hectares: row.area_hectares != null && row.area_hectares !== "" ? Number(row.area_hectares) : null,
-    acquired_date: row.acquired_date != null ? String(row.acquired_date).slice(0, 10) : null,
-    notes: row.notes != null ? String(row.notes) : null,
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
-  };
-}
-
-function normalizeFarmer(row: Record<string, unknown>): Farmer {
-  return {
-    id: String(row.id),
-    name: String(row.name ?? ""),
-    gender: (row.gender === "Female" ? "Female" : "Male") as Farmer["gender"],
-    barangay: String(row.barangay ?? ""),
-    household_id: row.household_id != null ? String(row.household_id) : null,
-    is_household_head: row.is_household_head === true,
-    rsbsa_number: row.rsbsa_number != null ? String(row.rsbsa_number) : null,
-    birth_date: row.birth_date != null ? String(row.birth_date).slice(0, 10) : null,
-    civil_status: row.civil_status != null ? String(row.civil_status) : null,
-    photo_url: row.photo_url != null ? String(row.photo_url) : null,
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
-  };
-}
-
-/**
- * Derive a lifecycle status for a row that's missing the column (e.g. a record
- * created before migration 010 was applied). Mirrors the SQL backfill so client
- * and server agree on the inferred status.
- */
-function deriveLifecycleStatus(r: AgriRecord): LifecycleStatus {
-  if (r.commodity === "Fishery") {
-    return numField(r.harvesting_fishery) > 0 ? "harvested" : "planted";
-  }
-  if (numField(r.harvesting_output_bags) > 0) return "harvested";
-  const damage = numField(r.damage_pests_hectares) + numField(r.damage_calamity_hectares);
-  const area = numField(r.planting_area_hectares);
-  if (area > 0 && damage >= area) return "total_loss";
-  if (damage > 0) return "damaged";
-  return "planted";
-}
-
-function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
-  const r = row as unknown as AgriRecord;
-  const sub = typeof r.sub_category === "string" ? r.sub_category : String(r.sub_category ?? "");
-  const base: AgriRecord = {
-    ...r,
-    commodity: normalizeCommodity(r.commodity, sub),
-    farmer_ids: Array.isArray(r.farmer_ids) ? (r.farmer_ids as string[]) : [],
-    calamity_sub_category: normalizeCalamitySubCategory(row.calamity_sub_category),
-    planting_area_hectares: numField(r.planting_area_hectares),
-    harvesting_output_bags: numField(r.harvesting_output_bags),
-    damage_pests_hectares: numField(r.damage_pests_hectares),
-    damage_calamity_hectares: numField(r.damage_calamity_hectares),
-    stocking: numField(r.stocking),
-    harvesting_fishery: numField(r.harvesting_fishery),
-    farmer_male: numField(r.farmer_male),
-    farmer_female: numField(r.farmer_female),
-    total_farmers: numField(r.total_farmers),
-    lifecycle_status: isLifecycleStatus(row.lifecycle_status) ? row.lifecycle_status : "planted",
-  };
-  // If the row arrived without a status (pre-migration row), derive it from
-  // the numeric fields so aggregations don't dump everything into "planted".
-  if (!isLifecycleStatus(row.lifecycle_status)) {
-    base.lifecycle_status = deriveLifecycleStatus(base);
-  }
-  return base;
-}
 
 function computeFarmerFields(farmerIds: string[], allFarmers: Farmer[]) {
   const linked = allFarmers.filter((f) => farmerIds.includes(f.id));
@@ -358,6 +120,9 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const recordsRef = useRef<AgriRecord[]>(records);
   useEffect(() => { recordsRef.current = records; }, [records]);
+
+  const householdsRef = useRef<Household[]>(households);
+  useEffect(() => { householdsRef.current = households; }, [households]);
 
   /* ── Load from Supabase on login ──────────────────────────────── */
   useEffect(() => {
@@ -454,34 +219,6 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const fid = new Set(vf.map((f) => f.id));
     return farmerAssets.filter((a) => fid.has(a.farmer_id));
   }, [farmerAssets, vf]);
-
-  const vfIds = useMemo(() => new Set(vf.map((f) => f.id)), [vf]);
-
-  const organizationStats = useMemo(() => {
-    const counts = new Map<string, number>();
-    farmerOrganizations.forEach(({ farmer_id, organization_id }) => {
-      if (vfIds.has(farmer_id)) {
-        counts.set(organization_id, (counts.get(organization_id) || 0) + 1);
-      }
-    });
-    return sortBy(
-      vo.map((org) => ({
-      id: org.id,
-      name: org.name,
-      org_type: org.org_type,
-      memberCount: counts.get(org.id) || 0,
-      })),
-      (o) => o.name,
-    );
-  }, [farmerOrganizations, vfIds, vo]);
-
-  const uniqueFarmersInOrganizations = useMemo(() => {
-    const ids = new Set<string>();
-    farmerOrganizations.forEach(({ farmer_id }) => {
-      if (vfIds.has(farmer_id)) ids.add(farmer_id);
-    });
-    return ids.size;
-  }, [farmerOrganizations, vfIds]);
 
   const getHousehold = useCallback(
     (id: string | null) => (id ? households.find((h) => h.id === id) : undefined),
@@ -649,6 +386,14 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       created_at: now,
       updated_at: now,
     } as AgriRecord;
+    newRecord.commodity_group = newRecord.commodity_group ?? commodityGroupForCommodity(newRecord.commodity);
+    const allocationCheck = validateHouseholdCropAllocation({
+      record: newRecord,
+      households: householdsRef.current,
+      records: recordsRef.current,
+      farmers: farmersRef.current,
+    });
+    if (!allocationCheck.ok) return { ok: false, message: allocationCheck.message };
     const { error } = await supabase.from("agri_records").insert(agriRecordInsertRow(newRecord));
     if (error) return { ok: false, message: friendlyDbError(error) };
     setRecords((prev) => [...prev, newRecord]);
@@ -661,6 +406,15 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const payload = { ...data, ...ff, farmer_ids: data.farmer_ids || [] };
     const existing = recordsRef.current.find((r) => r.id === id);
     const merged = ({ ...(existing ?? {}), ...payload, id, updated_at: now } as AgriRecord);
+    merged.commodity_group = merged.commodity_group ?? commodityGroupForCommodity(merged.commodity);
+    const allocationCheck = validateHouseholdCropAllocation({
+      record: merged,
+      households: householdsRef.current,
+      records: recordsRef.current,
+      farmers: farmersRef.current,
+      excludeRecordId: id,
+    });
+    if (!allocationCheck.ok) return { ok: false, message: allocationCheck.message };
     const { error } = await supabase
       .from("agri_records")
       .update(agriRecordInsertRow(merged))
@@ -914,176 +668,39 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   /* ── Computed / memoised values ────────────────────────────────── */
 
   function getProductionValue(r: AgriRecord): number {
-    return productionOutputForRecord(r);
+    // Backward-compatible hook for legacy callers.
+    // Crop KPI is bag/ton; fishery/livestock are separate units.
+    if (recordGroup(r as any) === "FISHERY") return numField(r.harvesting_fishery);
+    if (recordGroup(r as any) === "LIVESTOCK") return numField(r.livestock_output_heads);
+    return numField(r.harvesting_output_bags);
   }
 
-  const farmersByBarangay = useMemo(() => {
-    const map: Record<string, Farmer[]> = {};
-    BARANGAYS.forEach((b) => { map[b] = []; });
-    vf.forEach((f) => {
-      if (map[f.barangay]) map[f.barangay].push(f);
-    });
-    BARANGAYS.forEach((b) => {
-      map[b] = sortBy(map[b], (f) => lastNameSortKey(f.name) || fullNameSortKey(f.name));
-    });
-    return map;
-  }, [vf]);
+  // Metric memos were moved to lib/contexts/metrics-context.tsx (Phase 5 step A).
+  // AgriDataProvider only owns raw state + mutations now; derivations live in MetricsProvider.
 
-  const totalFarmers = useMemo(() => {
-    const male = vf.filter((f) => f.gender === "Male").length;
-    const female = vf.filter((f) => f.gender === "Female").length;
-    return { male, female, total: vf.length };
-  }, [vf]);
-
-  const totalProduction = useMemo(() => {
-    const bags = vr.reduce((s, r) => s + getProductionValue(r), 0);
-    return { bags, tons: +(bags * 0.04).toFixed(2) };
-  }, [vr]);
-
-  // Active = planted | damaged. Excludes finalized rows so the "still in field"
-  // KPI doesn't double-count the same area after the harvest is recorded.
-  const totalPlantingArea = useMemo(
-    () =>
-      +vr
-        .filter((r) => isActiveStatus(r.lifecycle_status))
-        .reduce((s, r) => s + r.planting_area_hectares, 0)
-        .toFixed(2),
-    [vr],
-  );
-  const totalDamagedArea = useMemo(
-    () => +vr.reduce((s, r) => s + damageHectaresForRecord(r), 0).toFixed(2),
-    [vr],
-  );
-
-  const mostProducedCommodity = useMemo(() => {
-    const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + getProductionValue(r); });
-    const sorted = Object.entries(t).sort((a, b) => b[1] - a[1]);
-    return sorted[0]?.[0] ?? "N/A";
-  }, [vr]);
-
-  const productionByCommodity = useMemo(() => {
-    const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + getProductionValue(r); });
-    return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
-  }, [vr]);
-
-  const productionBySubCategory = useMemo(() => {
-    const t: Record<string, { commodity: string; bags: number }> = {};
-    vr.forEach((r) => {
-      if (!t[r.sub_category]) t[r.sub_category] = { commodity: r.commodity, bags: 0 };
-      t[r.sub_category].bags += getProductionValue(r);
-    });
-    return Object.entries(t).map(([name, v]) => ({ name, ...v, tons: +(v.bags * 0.04).toFixed(2) }));
-  }, [vr]);
-
-  const farmersByCommodity = useMemo(() => {
-    const t: Record<string, { male: number; female: number; total: number }> = {};
-    vr.forEach((r) => {
-      if (!t[r.commodity]) t[r.commodity] = { male: 0, female: 0, total: 0 };
-      t[r.commodity].male += r.farmer_male;
-      t[r.commodity].female += r.farmer_female;
-      t[r.commodity].total += r.total_farmers;
-    });
-    return Object.entries(t).map(([name, v]) => ({ name, ...v }));
-  }, [vr]);
-
-  const damageRiskData = useMemo(
-    () =>
-      vr
-        .filter(
-          (r) =>
-            damageHectaresForRecord(r) > 0 ||
-            r.pests_diseases !== "None" ||
-            r.calamity !== "None" ||
-            r.calamity_sub_category !== "None",
-        )
-        .sort((a, b) => damageHectaresForRecord(b) - damageHectaresForRecord(a)),
-    [vr],
-  );
-
-  const damageByCommodity = useMemo(() => {
-    const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.commodity] = (t[r.commodity] || 0) + damageHectaresForRecord(r); });
-    return Object.entries(t)
-      .map(([name, area]) => ({ name, area: +area.toFixed(2) }))
-      .sort((a, b) => b.area - a.area);
-  }, [vr]);
-
-  const damageByBarangay = useMemo(() => {
-    const t: Record<string, number> = {};
-    vr.forEach((r) => { t[r.barangay] = (t[r.barangay] || 0) + damageHectaresForRecord(r); });
-    return t;
-  }, [vr]);
-
-  const mostAffectedBarangay = useMemo(() => {
-    const entries = Object.entries(damageByBarangay);
-    if (entries.length === 0) return "None";
-    const max = entries.reduce((a, b) => (b[1] > a[1] ? b : a));
-    return max[1] > 0 ? max[0] : "None";
-  }, [damageByBarangay]);
-
-  const damagePercentage = useMemo(
-    () => (totalPlantingArea > 0 ? +((totalDamagedArea / totalPlantingArea) * 100).toFixed(1) : 0),
-    [totalDamagedArea, totalPlantingArea],
-  );
-
-  const affectedFarmerCount = useMemo(
-    () => vr.filter((r) => damageHectaresForRecord(r) > 0).reduce((s, r) => s + r.total_farmers, 0),
-    [vr],
-  );
-
-  const damageTrend = useMemo<"increasing" | "decreasing" | "stable">(() => {
-    const sorted = [...damageRiskData].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    if (sorted.length < 2) return "stable";
-    const mid = Math.floor(sorted.length / 2);
-    const olderDmg = sorted.slice(0, mid).reduce((s, r) => s + damageHectaresForRecord(r), 0);
-    const newerDmg = sorted.slice(mid).reduce((s, r) => s + damageHectaresForRecord(r), 0);
-    if (newerDmg > olderDmg * 1.1) return "increasing";
-    if (newerDmg < olderDmg * 0.9) return "decreasing";
-    return "stable";
-  }, [damageRiskData]);
-
-  const recordsByDate = useMemo(() => {
-    const map: Record<string, AgriRecord[]> = {};
-    vr.forEach((r) => {
-      const day = new Date(r.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-      if (!map[day]) map[day] = [];
-      map[day].push(r);
-    });
-    return map;
-  }, [vr]);
-
-  const [staleTimestamp, setStaleTimestamp] = useState(() => Date.now());
-  useEffect(() => { setStaleTimestamp(Date.now()); }, [records]);
-
-  const staleBarangays = useMemo(() => {
-    return BARANGAYS.map((name) => {
-      const br = records.filter((r) => r.barangay === name);
-      if (br.length === 0) return { name, daysSinceUpdate: null, lastUpdate: null };
-      const latest = br.reduce((max, r) => (r.created_at > max ? r.created_at : max), "");
-      return {
-        name,
-        daysSinceUpdate: Math.floor((staleTimestamp - new Date(latest).getTime()) / 86400000),
-        lastUpdate: latest.slice(0, 10),
-      };
-    });
-  }, [records, staleTimestamp]);
-
-  const value: AgriContextValue = {
-    records: vr,
-    addRecord,
-    updateRecord,
-    deleteRecord,
+  // Phase 5 / refactor: split the legacy single context into three
+  // domain-specific contexts (Farmers, Programs, Records) plus Metrics.
+  // Each new context exposes only its slice so consumers can subscribe
+  // narrowly via `useFarmers()` / `usePrograms()` / `useRecords()`.
+  const farmersValue: FarmersContextValue = {
     farmers: vf,
+    farmerOrganizations,
     addFarmer,
     updateFarmer,
     deleteFarmer,
     getFarmersByIds,
-    farmersByBarangay,
+    getOrganizationIdsForFarmer,
+    saveFarmerOrganizations,
+    farmerAssets: vAssets,
+    getAssetsForFarmer,
+    addFarmerAsset,
+    updateFarmerAsset,
+    deleteFarmerAsset,
+  };
+
+  const programsValue: ProgramsContextValue = {
     households: vh,
     organizations: vo,
-    farmerOrganizations,
     getHousehold,
     addHousehold,
     updateHousehold,
@@ -1091,44 +708,59 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     addOrganization,
     updateOrganization,
     deleteOrganization,
-    saveFarmerOrganizations,
     householdSubsidies: vSubs,
     getSubsidiesForHousehold,
     addHouseholdSubsidy,
     updateHouseholdSubsidy,
     deleteHouseholdSubsidy,
-    farmerAssets: vAssets,
-    getAssetsForFarmer,
-    addFarmerAsset,
-    updateFarmerAsset,
-    deleteFarmerAsset,
-    getOrganizationIdsForFarmer,
-    organizationStats,
-    uniqueFarmersInOrganizations,
-    totalFarmers,
-    totalProduction,
-    totalPlantingArea,
-    totalDamagedArea,
-    mostProducedCommodity,
-    productionByCommodity,
-    productionBySubCategory,
-    farmersByCommodity,
-    damageRiskData,
-    damageByCommodity,
-    damageByBarangay,
-    mostAffectedBarangay,
-    damagePercentage,
-    affectedFarmerCount,
-    damageTrend,
-    recordsByDate,
-    staleBarangays,
   };
 
-  return <AgriContext.Provider value={value}>{children}</AgriContext.Provider>;
+  const recordsValue: RecordsContextValue = {
+    records: vr,
+    addRecord,
+    updateRecord,
+    deleteRecord,
+  };
+
+  return (
+    <FarmersProvider value={farmersValue}>
+      <ProgramsProvider value={programsValue}>
+        <RecordsProvider value={recordsValue}>
+          <MetricsProvider>{children}</MetricsProvider>
+        </RecordsProvider>
+      </ProgramsProvider>
+    </FarmersProvider>
+  );
 }
 
-export function useAgriData() {
-  const ctx = useContext(AgriContext);
-  if (!ctx) throw new Error("useAgriData must be used within AgriDataProvider");
-  return ctx;
+/**
+ * Legacy facade. Returns the merged shape of all four split contexts so
+ * existing components using `useAgriData()` keep working unchanged.
+ *
+ * New components should prefer the narrow hooks:
+ *   - `useFarmers()`   — farmer registry + assets + org links
+ *   - `usePrograms()`  — households + organizations + subsidies
+ *   - `useRecords()`   — agri_records + record mutations
+ *   - `useMetrics()`   — all derived summaries / KPIs
+ *
+ * The narrow hooks re-render only when their slice changes, so prefer them
+ * once you've migrated a component.
+ */
+export function useAgriData():
+  & FarmersContextValue
+  & ProgramsContextValue
+  & RecordsContextValue
+  & MetricsContextValue {
+  const farmers = useContext(FarmersContext);
+  const programs = useContext(ProgramsContext);
+  const records = useContext(RecordsContext);
+  const metrics = useContext(MetricsContext);
+  if (!farmers) throw new Error("useAgriData must be used within AgriDataProvider (FarmersProvider missing)");
+  if (!programs) throw new Error("useAgriData must be used within AgriDataProvider (ProgramsProvider missing)");
+  if (!records) throw new Error("useAgriData must be used within AgriDataProvider (RecordsProvider missing)");
+  if (!metrics) throw new Error("useAgriData must be used within AgriDataProvider (MetricsProvider missing)");
+  return useMemo(
+    () => ({ ...farmers, ...programs, ...records, ...metrics }),
+    [farmers, programs, records, metrics],
+  );
 }

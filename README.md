@@ -1,4 +1,11 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## AgriDash (AgriData Dashboard)
+
+Municipal agricultural monitoring dashboard for Tubo: farmers registry, production records, damage/risk analytics, and programs/subsidies tracking.
+
+## Architecture (high level)
+
+- **App shell**: single-page tabbed dashboard in `app/page.tsx` (Overview, Damage, Farmers, Records, Programs, etc.).\n+- **Data layer**: client-side provider `lib/agri-context.tsx` loads Supabase tables on login, then exposes **visible, role-scoped slices** (barangay users see only their scope).\n+- **Defaults**:\n+  - **Alphabetical sorting** is applied in the context for farmers/households/organizations and in key pickers (case-insensitive, trimmed).\n+  - **Programs page** (`components/dashboard/ProgramsView.tsx`) has per-page pagination for households and organizations.\n+  - **Org members**: member count is clickable and opens a modal roster (`components/dashboard/OrganizationMembersDialog.tsx`) with deep-link to the Farmers registry.\n+  - **Destructive actions**: confirmation dialogs are centralized via `components/ui/ConfirmDialog.tsx` (type-to-confirm for org/household deletes).\n+
+## Getting Started
 
 ## Getting Started
 

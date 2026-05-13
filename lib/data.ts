@@ -73,10 +73,16 @@ export function isLifecycleStatus(s: unknown): s is LifecycleStatus {
 export const isActiveStatus = (s: LifecycleStatus) => s === "planted" || s === "damaged";
 export const isFinalizedStatus = (s: LifecycleStatus) => s === "harvested" || s === "total_loss";
 
+/** Postgres Phase 2 lifecycle column when synced with legacy `lifecycle_status`. */
+export type PhaseRecordStatus = "active" | "harvested" | "damaged" | "archived";
+
+/** Denormalized commodity grouping from Postgres when present. */
+export type AgriCommodityGroup = "CROP" | "FISHERY" | "LIVESTOCK";
+
 export type AgriRecord = {
   id: string;
   barangay: string;
-  commodity: "Rice" | "Corn" | "Fishery" | "High Value Crops" | "Industrial Crops";
+  commodity: "Rice" | "Corn" | "Fishery" | "High Value Crops" | "Industrial Crops" | "Livestock";
   sub_category: string;
   farmer_ids: string[];       // linked Farmer IDs
   farmer_names: string;       // denormalized from linked farmers
@@ -89,6 +95,12 @@ export type AgriRecord = {
   damage_calamity_hectares: number;
   stocking: number;            // Fishery only
   harvesting_fishery: number;  // Fishery only
+  /** Phase 1: fishery loss (pieces). */
+  fishery_loss_pieces?: number | null;
+  /** Phase 1: livestock (heads). */
+  livestock_stocking_heads?: number | null;
+  livestock_output_heads?: number | null;
+  livestock_dead_heads?: number | null;
   pests_diseases: string;
   calamity: string;
   /** Controlled type: Typhoon, Flood, etc.; use `calamity` for event name / detail. */
@@ -98,6 +110,9 @@ export type AgriRecord = {
   period_year: number | null;  // e.g. 2026
   /** Lifecycle status — gates which aggregator buckets a row contributes to. */
   lifecycle_status: LifecycleStatus;
+  /** Phase 2 lifecycle column (when present). */
+  status?: PhaseRecordStatus | null;
+  commodity_group?: AgriCommodityGroup | null;
   created_at: string;          // ISO timestamp
   updated_at: string;          // ISO timestamp
 };
@@ -410,12 +425,14 @@ export const COMMODITY_OPTIONS = [
   "Fishery",
   "High Value Crops",
   "Industrial Crops",
+  "Livestock",
 ] as const;
 
 export const SUB_TYPES: Record<string, string[]> = {
   Rice: ["Hybrid", "Inbred", "Traditional"],
   Corn: [],
   Fishery: ["Tilapia", "Eel", "Palileng", "Bunog", "Udang", "Wadingan", "Kenpa", "Frog", "Carp", "Hito"],
+  Livestock: ["Cattle", "Carabao", "Swine", "Goat", "Sheep", "Chicken", "Duck", "Turkey", "Rabbit", "Other"],
   "High Value Crops": [
     "Coffee", "Mango", "Eggplant", "Ampalaya", "Pole Sitao", "Upo",
     "Squash", "Tomato", "Petchay", "Ginger", "Sili", "Cabbage",
@@ -439,6 +456,7 @@ export function normalizeCommodity(raw: unknown, sub_category?: string): AgriRec
   const sub = typeof sub_category === "string" ? sub_category.trim() : "";
   if (sub && SUB_TYPES.Fishery.includes(sub)) return "Fishery";
   if (sub && SUB_TYPES.Rice.includes(sub)) return "Rice";
+  if (sub && SUB_TYPES.Livestock.includes(sub)) return "Livestock";
   if (sub && SUB_TYPES["High Value Crops"].includes(sub)) return "High Value Crops";
   if (sub && SUB_TYPES["Industrial Crops"].includes(sub)) return "Industrial Crops";
 
@@ -450,6 +468,7 @@ export function normalizeCommodity(raw: unknown, sub_category?: string): AgriRec
     fishery: "Fishery",
     fish: "Fishery",
     fisheries: "Fishery",
+    livestock: "Livestock",
     hvc: "High Value Crops",
     "high value crop": "High Value Crops",
     "high-value crops": "High Value Crops",
@@ -467,17 +486,37 @@ export function normalizeCommodity(raw: unknown, sub_category?: string): AgriRec
 
 /**
  * Production output for a record — only `harvested` rows contribute.
- * Fishery returns piece count; crops return 40kg bag count.
+ * Fishery returns fish count; crops return 40kg bag count.
  * Non-finalized or `total_loss` rows return 0 by design.
  */
 export function productionOutputForRecord(r: AgriRecord): number {
   if (r.lifecycle_status !== "harvested") return 0;
   if (r.commodity === "Fishery") {
-    const fish = numField(r.harvesting_fishery);
-    if (fish > 0) return fish;
-    return numField(r.harvesting_output_bags);
+    return numField(r.harvesting_fishery);
+  }
+  if (r.commodity === "Livestock") {
+    return numField(r.livestock_output_heads);
   }
   return numField(r.harvesting_output_bags);
+}
+
+/** Harvest totals by commodity group (only `harvested` lifecycle rows contribute). */
+export function summarizeHarvestOutput(records: AgriRecord[]): {
+  cropBags: number;
+  fisheryFish: number;
+  livestockHeads: number;
+} {
+  let cropBags = 0;
+  let fisheryFish = 0;
+  let livestockHeads = 0;
+  for (const r of records) {
+    const out = productionOutputForRecord(r);
+    if (out <= 0) continue;
+    if (r.commodity === "Fishery") fisheryFish += out;
+    else if (r.commodity === "Livestock") livestockHeads += out;
+    else cropBags += out;
+  }
+  return { cropBags, fisheryFish, livestockHeads };
 }
 
 /**
@@ -501,6 +540,7 @@ export const COMMODITY_COLORS: Record<string, string> = {
   Fishery: "#0284c7",
   "High Value Crops": "#9333ea",
   "Industrial Crops": "#ea580c",
+  Livestock: "#9f1239",
 };
 
 // ── Philippine Timezone Helpers ──────────────────────────────────────────

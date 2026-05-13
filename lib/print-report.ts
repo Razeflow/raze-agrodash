@@ -1,10 +1,24 @@
-import type { AgriRecord, Farmer } from "./data";
-import { BARANGAYS, COMMODITY_COLORS, CALAMITY_SUB_CATEGORY_LABELS, productionOutputForRecord } from "./data";
+import type { AgriRecord, Farmer, Household } from "./data";
+import { BARANGAYS, COMMODITY_COLORS, CALAMITY_SUB_CATEGORY_LABELS, numField } from "./data";
+import {
+  getBarangaySummary,
+  getCapacitySummary,
+  getCropMetrics,
+  getDamageSummary,
+  getFisheryMetrics,
+  getLifecycleSummary,
+  getLivestockMetrics,
+  getProductionByCommodity,
+  getTopCommodity,
+  getRiskRanking,
+} from "@/lib/domain/metrics";
+import { formatAggregationMeta, getAggregationMeta } from "@/lib/domain/audit";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ReportData = {
   records: AgriRecord[];
   farmers: Farmer[];
+  households?: Household[];
 };
 
 type Period = "monthly" | "quarterly" | "yearly" | "full";
@@ -153,54 +167,58 @@ function periodLabel(period: Period, refDate: Date): string {
 
 // ── Main HTML generator ──────────────────────────────────────────────────────
 function generateReportHTML(data: ReportData, period: Period, refDate: Date): string {
-  const { farmers } = data;
+  const { farmers, households } = data;
   const recs = filterByPeriod(data.records, period, refDate);
   const pLabel = periodLabel(period, refDate);
   const dateStr = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
-  // Compute stats
+  // ── Compute stats (all via domain aggregators) ────────────────────────────
   const totalMale = recs.reduce((s, r) => s + r.farmer_male, 0);
   const totalFemale = recs.reduce((s, r) => s + r.farmer_female, 0);
-  const totalBags = recs.reduce((s, r) => s + productionOutputForRecord(r), 0);
-  const totalArea = recs.reduce((s, r) => s + r.planting_area_hectares, 0);
-  const totalDmg = recs.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
-  const dmgPct = totalArea > 0 ? ((totalDmg / totalArea) * 100).toFixed(1) : "0";
 
-  // Production by commodity
-  const prodByCom: Record<string, number> = {};
-  recs.forEach((r) => { prodByCom[r.commodity] = (prodByCom[r.commodity] || 0) + productionOutputForRecord(r); });
-  const topCommodity = Object.entries(prodByCom).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+  const crop = getCropMetrics(recs as any);
+  const fishery = getFisheryMetrics(recs as any);
+  const livestock = getLivestockMetrics(recs as any);
+  const dmg = getDamageSummary(recs as any);
+  const lifecycle = getLifecycleSummary(recs as any);
+  const capacity = households ? getCapacitySummary(recs as any, households, farmers) : null;
 
-  // Damage by commodity
-  const dmgByCom: Record<string, number> = {};
-  recs.forEach((r) => {
-    const d = r.damage_pests_hectares + r.damage_calamity_hectares;
-    if (d > 0) dmgByCom[r.commodity] = (dmgByCom[r.commodity] || 0) + d;
-  });
+  const cropBags = crop.harvestedBags;
+  const cropTons = crop.harvestedMetricTons;
+  const fisheryFish = fishery.harvestedPieces;
+  const livestockHeads = livestock.outputHeads;
 
-  // Per-barangay stats
-  const brgyStats = BARANGAYS.map((b) => {
-    const br = recs.filter((r) => r.barangay === b);
-    const bf = farmers.filter((f) => f.barangay === b);
-    return {
-      name: b,
-      records: br.length,
-      farmers: bf.length,
-      male: bf.filter((f) => f.gender === "Male").length,
-      female: bf.filter((f) => f.gender === "Female").length,
-      bags: br.reduce((s, r) => s + productionOutputForRecord(r), 0),
-      area: br.reduce((s, r) => s + r.planting_area_hectares, 0),
-      damage: br.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0),
-    };
-  });
+  const cropActiveArea = lifecycle.active.cropAreaHa;
+  const cropDmgInSeasonHa = dmg.crop.damageHa;
+  const cropDmgPctOfActive = dmg.crop.damagePctOfActive;
+
+  const topCommodity = getTopCommodity(recs as any);
+  const cropByCommodity = getProductionByCommodity(recs as any, "CROP");
+  const fisheryByCommodity = getProductionByCommodity(recs as any, "FISHERY");
+  const livestockByCommodity = getProductionByCommodity(recs as any, "LIVESTOCK");
+
+  const barangaySummary = getBarangaySummary(recs as any, BARANGAYS);
+  const riskRanking = getRiskRanking(recs as any, BARANGAYS);
 
   // Charts
-  const prodChartData = Object.entries(prodByCom).map(([name, bags]) => ({
-    label: name, value: bags, color: COMMODITY_COLORS[name] || "#888",
+  const cropProdChartData = cropByCommodity.map((r) => ({
+    label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#888",
+  }));
+  const fisheryProdChartData = fisheryByCommodity.map((r) => ({
+    label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#0284c7",
+  }));
+  const livestockProdChartData = livestockByCommodity.map((r) => ({
+    label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#7c3aed",
   }));
 
-  const brgyProdData = brgyStats.map((b) => ({
-    label: b.name, value: b.bags, color: "#16a34a",
+  const brgyCropProdData = barangaySummary.map((b) => ({
+    label: b.barangay, value: b.cropBags, color: "#16a34a",
+  }));
+  const brgyFisheryProdData = barangaySummary.map((b) => ({
+    label: b.barangay, value: b.fisheryFish, color: "#0284c7",
+  }));
+  const brgyLivestockProdData = barangaySummary.map((b) => ({
+    label: b.barangay, value: b.livestockHeads, color: "#7c3aed",
   }));
 
   const genderPieData = [
@@ -208,37 +226,42 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
     { label: "Female", value: totalFemale, color: "#ec4899" },
   ];
 
-  const commodityPieData = Object.entries(prodByCom).map(([name, bags]) => ({
-    label: name, value: bags, color: COMMODITY_COLORS[name] || "#888",
+  const cropCommodityPieData = cropByCommodity.map((r) => ({
+    label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#888",
   }));
 
-  const dmgChartData = Object.entries(dmgByCom).map(([name, area]) => ({
-    label: name, value: +area.toFixed(2), color: COMMODITY_COLORS[name] || "#dc2626",
+  const cropDamageChartData = dmg.crop.byCommodity.map((r) => ({
+    label: r.name, value: r.damageHa, color: COMMODITY_COLORS[r.name] || "#dc2626",
   }));
 
   // Build HTML sections
   let barangaySections = "";
-  for (const bs of brgyStats) {
-    if (bs.records === 0 && bs.farmers === 0) continue;
-    const brgyRecs = recs.filter((r) => r.barangay === bs.name);
-    const brgyFarmerList = farmers.filter((f) => f.barangay === bs.name);
+  for (const bs of barangaySummary) {
+    const brgyRecs = recs.filter((r) => r.barangay === bs.barangay);
+    const brgyFarmerList = farmers.filter((f) => f.barangay === bs.barangay);
+    if (brgyRecs.length === 0 && brgyFarmerList.length === 0) continue;
 
-    // Per-barangay commodity breakdown
-    const brgyCom: Record<string, number> = {};
-    brgyRecs.forEach((r) => { brgyCom[r.commodity] = (brgyCom[r.commodity] || 0) + productionOutputForRecord(r); });
-    const brgyComData = Object.entries(brgyCom).map(([name, bags]) => ({
-      label: name, value: bags, color: COMMODITY_COLORS[name] || "#888",
-    }));
+    const brgyCropCom = getProductionByCommodity(brgyRecs as any, "CROP");
+    const brgyFishCom = getProductionByCommodity(brgyRecs as any, "FISHERY");
+    const brgyLiveCom = getProductionByCommodity(brgyRecs as any, "LIVESTOCK");
+
+    const brgyCropComData = brgyCropCom.map((r) => ({ label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#888" }));
+    const brgyFishComData = brgyFishCom.map((r) => ({ label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#0284c7" }));
+    const brgyLiveComData = brgyLiveCom.map((r) => ({ label: r.name, value: r.value, color: COMMODITY_COLORS[r.name] || "#7c3aed" }));
 
     const recordRows = brgyRecs.map((r) => {
-      const dmg = r.damage_pests_hectares + r.damage_calamity_hectares;
+      const dmgHa = numField(r.damage_pests_hectares) + numField(r.damage_calamity_hectares);
       const calType = r.calamity_sub_category === "None" ? "—" : CALAMITY_SUB_CATEGORY_LABELS[r.calamity_sub_category];
       const calEvt = r.calamity === "None" ? "—" : r.calamity;
       return [
         r.commodity, r.sub_category, String(r.total_farmers),
         r.commodity === "Fishery" ? "—" : r.planting_area_hectares.toFixed(2),
-        r.commodity === "Fishery" ? `${productionOutputForRecord(r)}` : r.harvesting_output_bags.toLocaleString(),
-        dmg > 0 ? dmg.toFixed(2) : "—",
+        r.commodity === "Fishery"
+          ? `${numField(r.harvesting_fishery)} fish`
+          : r.commodity === "Livestock"
+            ? `${numField(r.livestock_output_heads)} heads`
+            : numField(r.harvesting_output_bags).toLocaleString(),
+        dmgHa > 0 ? dmgHa.toFixed(2) : "—",
         r.pests_diseases === "None" ? "—" : r.pests_diseases,
         calType,
         calEvt,
@@ -253,15 +276,19 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
 
     barangaySections += `
       <div class="page-break"></div>
-      <h2>Barangay ${bs.name}</h2>
+      <h2>Barangay ${bs.barangay}</h2>
       <div class="stats-row">
-        <div class="stat"><strong>${bs.farmers}</strong>Farmers (${bs.male}M / ${bs.female}F)</div>
-        <div class="stat"><strong>${bs.records}</strong>Records</div>
-        <div class="stat"><strong>${bs.bags.toLocaleString()}</strong>Bags Harvested</div>
-        <div class="stat"><strong>${bs.area.toFixed(1)} ha</strong>Planting Area</div>
-        <div class="stat"><strong>${bs.damage.toFixed(1)} ha</strong>Damaged</div>
+        <div class="stat"><strong>${brgyFarmerList.length}</strong>Farmers</div>
+        <div class="stat"><strong>${brgyRecs.length}</strong>Records</div>
+        <div class="stat"><strong>${bs.cropBags.toLocaleString()}</strong>Crop harvest (bags)</div>
+        <div class="stat"><strong>${bs.fisheryFish.toLocaleString()}</strong>Fishery harvest (fish)</div>
+        <div class="stat"><strong>${bs.livestockHeads.toLocaleString()}</strong>Livestock output (heads)</div>
+        <div class="stat"><strong>${bs.cropActiveAreaHa.toFixed(1)} ha</strong>Active crop area</div>
+        <div class="stat"><strong>${bs.cropDamageHa.toFixed(1)} ha</strong>Crop damage</div>
       </div>
-      ${barChartSVG(brgyComData, `${bs.name} — Production by Commodity (bags)`, 500, 220)}
+      ${brgyCropComData.length > 0 ? barChartSVG(brgyCropComData, `${bs.barangay} — Crop production (bags)`, 520, 220) : ""}
+      ${brgyFishComData.length > 0 ? barChartSVG(brgyFishComData, `${bs.barangay} — Fishery harvest (fish)`, 520, 220) : ""}
+      ${brgyLiveComData.length > 0 ? barChartSVG(brgyLiveComData, `${bs.barangay} — Livestock output (heads)`, 520, 220) : ""}
       ${brgyRecs.length > 0 ? `<h3>Commodity Records</h3>${tableHTML(["Commodity", "Variety", "Farmers", "Area (ha)", "Harvest", "Damage (ha)", "Pests", "Calamity type", "Calamity event"], recordRows)}` : ""}
       ${brgyFarmerList.length > 0 ? `<h3>Farmer Roster</h3>${tableHTML(["#", "Name", "Gender", "RSBSA", "Registered"], farmerRows)}` : ""}
     `;
@@ -321,47 +348,128 @@ function generateReportHTML(data: ReportData, period: Period, refDate: Date): st
   <div class="kpi-grid">
     <div class="kpi"><div class="label">Total Records</div><div class="value">${recs.length}</div></div>
     <div class="kpi" style="border-left-color:#3b82f6"><div class="label">Total Farmers</div><div class="value">${totalMale + totalFemale}</div><div class="sub">${totalMale}M / ${totalFemale}F</div></div>
-    <div class="kpi" style="border-left-color:#ca8a04"><div class="label">Production</div><div class="value">${totalBags.toLocaleString()}</div><div class="sub">bags (${(totalBags * 0.04).toFixed(1)} MT)</div></div>
-    <div class="kpi" style="border-left-color:#0284c7"><div class="label">Planting Area</div><div class="value">${totalArea.toFixed(1)}</div><div class="sub">hectares</div></div>
-    <div class="kpi" style="border-left-color:#dc2626"><div class="label">Damaged Area</div><div class="value">${totalDmg.toFixed(1)}</div><div class="sub">ha (${dmgPct}%)</div></div>
+    <div class="kpi" style="border-left-color:#ca8a04"><div class="label">Crop production</div><div class="value">${cropBags.toLocaleString()}</div><div class="sub">${cropTons.toLocaleString()} MT (bags × 0.04)</div></div>
+    <div class="kpi" style="border-left-color:#0284c7"><div class="label">Fishery harvest</div><div class="value">${fisheryFish.toLocaleString()}</div><div class="sub">fish (finalized harvest)</div></div>
+    <div class="kpi" style="border-left-color:#7c3aed"><div class="label">Livestock output</div><div class="value">${livestockHeads.toLocaleString()}</div><div class="sub">heads (finalized output)</div></div>
+    <div class="kpi" style="border-left-color:#0284c7"><div class="label">Active crop area</div><div class="value">${cropActiveArea.toFixed(1)}</div><div class="sub">hectares (active cycles)</div></div>
+    <div class="kpi" style="border-left-color:#dc2626"><div class="label">Crop damage</div><div class="value">${cropDmgInSeasonHa.toFixed(1)}</div><div class="sub">ha (${cropDmgPctOfActive.toFixed(1)}% of active)</div></div>
     <div class="kpi" style="border-left-color:#9333ea"><div class="label">Top Commodity</div><div class="value" style="font-size:16px">${topCommodity}</div></div>
+    ${capacity ? `<div class="kpi" style="border-left-color:#10b981"><div class="label">Capacity utilization</div><div class="value">${capacity.utilizationPct.toFixed(1)}%</div><div class="sub">${capacity.activeAllocatedHa.toFixed(1)} ha active / ${capacity.totalCapacityHa.toFixed(1)} ha capacity</div></div>` : ""}
   </div>
 
   <div class="charts-row">
     <div class="chart-card">${pieChartSVG(genderPieData, "Gender Distribution")}</div>
-    <div class="chart-card">${pieChartSVG(commodityPieData, "Production Share")}</div>
+    <div class="chart-card">${pieChartSVG(cropCommodityPieData, "Crop Production Share (bags)")}</div>
   </div>
 
   <h2>Production Analytics</h2>
+  <h3>Crops</h3>
   ${tableHTML(
     ["Commodity", "Bags (40kg)", "Metric Tons", "Share %"],
-    Object.entries(prodByCom).map(([name, bags]) => [
-      name, bags.toLocaleString(), (bags * 0.04).toFixed(2),
-      totalBags > 0 ? ((bags / totalBags) * 100).toFixed(1) + "%" : "0%",
+    cropByCommodity.map((r) => [
+      r.name,
+      r.value.toLocaleString(),
+      (r.value * 0.04).toFixed(2),
+      cropBags > 0 ? ((r.value / cropBags) * 100).toFixed(1) + "%" : "0%",
     ])
   )}
-  ${barChartSVG(prodChartData, "Production by Commodity (bags)")}
-  ${barChartSVG(brgyProdData, "Production by Barangay (bags)", 640, 280)}
+  ${barChartSVG(cropProdChartData, "Crop production by commodity (bags)")}
+  ${barChartSVG(brgyCropProdData, "Crop production by barangay (bags)", 640, 280)}
 
-  ${Object.keys(dmgByCom).length > 0 ? `
-    <h2>Damage & Risk Analysis</h2>
-    ${tableHTML(
-      ["Commodity", "Damaged Area (ha)"],
-      Object.entries(dmgByCom).sort((a, b) => b[1] - a[1]).map(([name, area]) => [name, area.toFixed(2)])
-    )}
-    ${barChartSVG(dmgChartData, "Damaged Area by Commodity (ha)")}
-  ` : ""}
+  <h3>Fishery</h3>
+  ${fisheryByCommodity.length > 0
+    ? `${tableHTML(["Commodity", "Harvest (fish)"], fisheryByCommodity.map((r) => [r.name, r.value.toLocaleString()]))}
+       ${barChartSVG(fisheryProdChartData, "Fishery harvest by commodity (fish)")}
+       ${barChartSVG(brgyFisheryProdData, "Fishery harvest by barangay (fish)", 640, 280)}`
+    : `<p style="color:#9ca3af;font-size:12px;">No fishery harvest in this period.</p>`
+  }
+
+  <h3>Livestock</h3>
+  ${livestockByCommodity.length > 0
+    ? `${tableHTML(["Commodity", "Output (heads)"], livestockByCommodity.map((r) => [r.name, r.value.toLocaleString()]))}
+       ${barChartSVG(livestockProdChartData, "Livestock output by commodity (heads)")}
+       ${barChartSVG(brgyLivestockProdData, "Livestock output by barangay (heads)", 640, 280)}`
+    : `<p style="color:#9ca3af;font-size:12px;">No livestock output in this period.</p>`
+  }
+
+  <h2>Damage & Risk Analysis</h2>
+  <h3>Crops (hectares)</h3>
+  ${dmg.crop.byCommodity.length > 0
+    ? `${tableHTML(
+        ["Commodity", "Damage (ha)", "Finalized loss (ha)"],
+        dmg.crop.byCommodity.map((r) => [r.name, r.damageHa.toFixed(2), "—"]),
+      )}
+       ${barChartSVG(cropDamageChartData, "Crop damaged area by commodity (ha)")}`
+    : `<p style="color:#9ca3af;font-size:12px;">No crop damage logged in this period.</p>`
+  }
+
+  <h3>Fishery (lost fish)</h3>
+  ${dmg.fishery.lossPieces > 0
+    ? tableHTML(["Metric", "Value"], [["Loss", dmg.fishery.lossPieces.toLocaleString() + " fish"]])
+    : `<p style="color:#9ca3af;font-size:12px;">No fishery loss finalized in this period.</p>`
+  }
+
+  <h3>Livestock (dead heads)</h3>
+  ${dmg.livestock.deadHeads > 0
+    ? tableHTML(["Metric", "Value"], [["Dead", dmg.livestock.deadHeads.toLocaleString() + " heads"]])
+    : `<p style="color:#9ca3af;font-size:12px;">No livestock loss finalized in this period.</p>`
+  }
+
+  <h3>Risk ranking (worst severity per barangay)</h3>
+  ${tableHTML(
+    ["Barangay", "Severity", "Crop damage (ha)", "Fish loss", "Livestock dead", "Affected farmers"],
+    riskRanking
+      .filter((r) => r.severity !== "LOW")
+      .slice(0, 12)
+      .map((r) => [
+        r.barangay,
+        r.severity,
+        r.cropDamageHa.toFixed(2),
+        r.fisheryLossPieces.toLocaleString(),
+        r.livestockDeadHeads.toLocaleString(),
+        String(r.affectedFarmers),
+      ]),
+  )}
 
   <h2>Barangay Summary</h2>
   ${tableHTML(
-    ["Barangay", "Records", "Farmers", "Male", "Female", "Harvest (bags)", "Area (ha)", "Damage (ha)"],
-    brgyStats.map((b) => [
-      b.name, String(b.records), String(b.farmers), String(b.male), String(b.female),
-      b.bags.toLocaleString(), b.area.toFixed(2), b.damage.toFixed(2),
-    ])
+    ["Barangay", "Records", "Farmers", "Crop harvest (bags)", "Fishery (fish)", "Livestock (heads)", "Active crop area (ha)", "Crop damage (ha)"],
+    barangaySummary.map((b) => {
+      const brgyFarmerCount = farmers.filter((f) => f.barangay === b.barangay).length;
+      return [
+        b.barangay,
+        String(b.recordCount),
+        String(brgyFarmerCount),
+        b.cropBags.toLocaleString(),
+        b.fisheryFish.toLocaleString(),
+        b.livestockHeads.toLocaleString(),
+        b.cropActiveAreaHa.toFixed(2),
+        b.cropDamageHa.toFixed(2),
+      ];
+    })
   )}
 
+  ${capacity ? `<h2>Capacity Utilization</h2>${tableHTML(
+      ["Household", "Capacity (ha)", "Active (ha)", "Remaining (ha)", "Utilization %", "Overallocated"],
+      capacity.perHousehold
+        .sort((a, b) => b.utilizationPct - a.utilizationPct)
+        .slice(0, 25)
+        .map((h) => [
+          h.householdId,
+          h.capacityHa.toFixed(2),
+          h.activeHa.toFixed(2),
+          h.remainingHa.toFixed(2),
+          h.utilizationPct.toFixed(1),
+          h.overallocated ? "YES" : "",
+        ])
+    )}` : ""}
+
   ${barangaySections}
+
+  <div style="margin-top:24px;color:#9ca3af;font-size:10px;">
+    <div>${formatAggregationMeta(getAggregationMeta(crop))}</div>
+    <div>${formatAggregationMeta(getAggregationMeta(dmg))}</div>
+  </div>
 </div>
 </body></html>`;
 }

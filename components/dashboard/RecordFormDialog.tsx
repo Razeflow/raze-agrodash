@@ -20,8 +20,22 @@ import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
 import FarmerSelectDialog from "./FarmerSelectDialog";
-import { recordFormSchema, RECORD_LIMITS, zodIssuesToErrors } from "@/lib/validations";
+import { recordFormSchema, RECORD_LIMITS, zodIssuesToErrors, type RecordFormInput } from "@/lib/validations";
 import { sortBy } from "@/lib/sort";
+import { commodityGroupForCommodity } from "@/lib/domain/commodity";
+import { recordStatus } from "@/lib/domain/metrics";
+import {
+  RECORD_STATUSES,
+  RECORD_STATUS_LABELS,
+  RECORD_STATUS_DESCRIPTIONS,
+  canTransition,
+  type RecordStatus,
+} from "@/lib/domain/status";
+import StatusBadge from "./record-form/StatusBadge";
+import CropFields from "./record-form/CropFields";
+import FisheryFields from "./record-form/FisheryFields";
+import LivestockFields from "./record-form/LivestockFields";
+import { FieldError, FieldLabel, inputCls, inputErrCls } from "./record-form/Field";
 
 type Props = {
   open: boolean;
@@ -42,14 +56,19 @@ type FormErrors = {
   damage_calamity_hectares?: string;
   stocking?: string;
   harvesting_fishery?: string;
+  fishery_loss_pieces?: string;
+  livestock_stocking_heads?: string;
+  livestock_output_heads?: string;
+  livestock_dead_heads?: string;
   calamity?: string;
   remarks?: string;
   lifecycle_status?: string;
+  status?: string;
 };
 
 function getEmptyForm() {
   const { month, year } = getCurrentPHPeriod();
-  return {
+  const out: RecordFormInput = {
     barangay: BARANGAYS[0] as string,
     commodity: "Rice" as AgriRecord["commodity"],
     sub_category: "Hybrid",
@@ -62,12 +81,41 @@ function getEmptyForm() {
     damage_calamity_hectares: 0,
     stocking: 0,
     harvesting_fishery: 0,
+    fishery_loss_pieces: 0,
+    livestock_stocking_heads: 0,
+    livestock_output_heads: 0,
+    livestock_dead_heads: 0,
     pests_diseases: "None",
     calamity: "None",
     calamity_sub_category: "None" as CalamitySubCategory,
     remarks: "",
     lifecycle_status: "planted" as LifecycleStatus,
+    status: "active" as RecordStatus,
   };
+  return out;
+}
+
+/**
+ * Phase 2: derive the legacy `lifecycle_status` from the canonical `status`
+ * + numeric evidence so existing aggregators / DB constraints stay green.
+ *
+ *   active   → "planted" (no damage) | "damaged" (mid-season damage > 0)
+ *   harvested → "harvested"
+ *   damaged  → "total_loss"
+ *   archived → preserve whatever the row had before (legacy column lacks an "archived" value)
+ */
+function deriveLifecycleFromStatus(
+  status: RecordStatus,
+  damageTotal: number,
+  prevLifecycle: LifecycleStatus,
+): LifecycleStatus {
+  if (status === "harvested") return "harvested";
+  if (status === "damaged") return "total_loss";
+  if (status === "archived") {
+    // Keep whatever was set before archiving — legacy column has no 'archived'.
+    return prevLifecycle === "harvested" || prevLifecycle === "total_loss" ? prevLifecycle : "harvested";
+  }
+  return damageTotal > 0 ? "damaged" : "planted";
 }
 
 export default function RecordFormDialog({ open, onClose, mode, initialData, defaultBarangay }: Props) {
@@ -78,7 +126,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     if (isBarangayUser && userBarangay) return [userBarangay];
     return sortBy([...BARANGAYS], (b) => b);
   }, [isBarangayUser, userBarangay]);
-  const [form, setForm] = useState(getEmptyForm());
+  const [form, setForm] = useState<RecordFormInput>(getEmptyForm());
   const [farmerSelectOpen, setFarmerSelectOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -106,11 +154,16 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           damage_calamity_hectares: initialData.damage_calamity_hectares,
           stocking: initialData.stocking,
           harvesting_fishery: initialData.harvesting_fishery,
+          fishery_loss_pieces: Number(initialData.fishery_loss_pieces ?? 0),
+          livestock_stocking_heads: Number(initialData.livestock_stocking_heads ?? 0),
+          livestock_output_heads: Number(initialData.livestock_output_heads ?? 0),
+          livestock_dead_heads: Number(initialData.livestock_dead_heads ?? 0),
           pests_diseases: initialData.pests_diseases,
           calamity: initialData.calamity,
           calamity_sub_category: initialData.calamity_sub_category ?? "None",
           remarks: initialData.remarks,
           lifecycle_status: initialData.lifecycle_status ?? "planted",
+          status: recordStatus(initialData as any),
         });
       } else {
         const empty = getEmptyForm();
@@ -119,12 +172,27 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     }
   }, [open, mode, initialData, defaultBarangay, isBarangayUser, userBarangay]);
 
+  // The status that's currently *saved* (used to gate which transitions the dropdown
+  // offers). For edit mode it's the row's stored status; for add mode there's no
+  // saved row yet so anything reachable from "active" is allowed.
+  const savedStatus: RecordStatus = useMemo(() => {
+    if (mode === "edit" && initialData) return recordStatus(initialData as any);
+    return "active";
+  }, [mode, initialData]);
+
   if (!mounted) return null;
 
   const isFishery = form.commodity === "Fishery";
+  const isLivestock = form.commodity === "Livestock";
+  const group = commodityGroupForCommodity(form.commodity as any);
   const isCorn = form.commodity === "Corn";
   const subTypes = SUB_TYPES[form.commodity] || [];
   const linkedFarmers = getFarmersByIds(form.farmer_ids);
+
+  const archived = form.status === "archived";
+  const finalized = form.status === "harvested" || form.status === "damaged";
+  // UX rule: finalized records lock numeric evidence; archived locks everything.
+  const lockEvidenceFields = archived || finalized;
 
   // Generate year options (current PH year -2 to +1)
   const { year: currentYear } = getCurrentPHPeriod();
@@ -149,14 +217,18 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       ...f,
       commodity,
       sub_category: commodity === "Corn" ? "Corn" : subs[0] || "",
-      planting_area_hectares: commodity === "Fishery" ? 0 : f.planting_area_hectares,
-      harvesting_output_bags: commodity === "Fishery" ? 0 : f.harvesting_output_bags,
-      damage_pests_hectares: commodity === "Fishery" ? 0 : f.damage_pests_hectares,
-      damage_calamity_hectares: commodity === "Fishery" ? 0 : f.damage_calamity_hectares,
+      planting_area_hectares: commodity === "Fishery" || commodity === "Livestock" ? 0 : f.planting_area_hectares,
+      harvesting_output_bags: commodity === "Fishery" || commodity === "Livestock" ? 0 : f.harvesting_output_bags,
+      damage_pests_hectares: commodity === "Fishery" || commodity === "Livestock" ? 0 : f.damage_pests_hectares,
+      damage_calamity_hectares: commodity === "Fishery" || commodity === "Livestock" ? 0 : f.damage_calamity_hectares,
       stocking: commodity === "Fishery" ? f.stocking : 0,
       harvesting_fishery: commodity === "Fishery" ? f.harvesting_fishery : 0,
-      calamity: commodity === "Fishery" ? "None" : f.calamity,
-      calamity_sub_category: commodity === "Fishery" ? "None" : f.calamity_sub_category,
+      fishery_loss_pieces: commodity === "Fishery" ? f.fishery_loss_pieces : 0,
+      livestock_stocking_heads: commodity === "Livestock" ? f.livestock_stocking_heads : 0,
+      livestock_output_heads: commodity === "Livestock" ? f.livestock_output_heads : 0,
+      livestock_dead_heads: commodity === "Livestock" ? f.livestock_dead_heads : 0,
+      calamity: commodity === "Fishery" || commodity === "Livestock" ? "None" : f.calamity,
+      calamity_sub_category: commodity === "Fishery" || commodity === "Livestock" ? "None" : f.calamity_sub_category,
     }));
     if (submitted) setErrors((e) => ({ ...e, commodity: undefined }));
   }
@@ -169,12 +241,31 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
+    // Phase 2: `status` is the canonical contract; legacy `lifecycle_status`
+    // is derived so existing aggregators / DB constraints stay green.
+    const damageTotal =
+      group === "CROP"
+        ? form.damage_pests_hectares + form.damage_calamity_hectares
+        : group === "FISHERY"
+          ? (form.fishery_loss_pieces ?? 0)
+          : (form.livestock_dead_heads ?? 0);
+    const prevLifecycle = (mode === "edit" && initialData?.lifecycle_status) || "planted";
+    const derivedLifecycle = deriveLifecycleFromStatus(
+      form.status as RecordStatus,
+      damageTotal,
+      prevLifecycle as LifecycleStatus,
+    );
+
     const data = {
       ...form,
       sub_category: isCorn ? "Corn" : form.sub_category,
       farmer_ids: form.farmer_ids,
       period_month: form.period_month,
       period_year: form.period_year,
+      commodity: form.commodity as AgriRecord["commodity"],
+      lifecycle_status: derivedLifecycle,
+      status: form.status as RecordStatus,
+      calamity_sub_category: form.calamity_sub_category as CalamitySubCategory,
     };
     setSaving(true);
     try {
@@ -206,9 +297,6 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     }
   }
 
-  const inputCls = "w-full rounded-[1.5rem] border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2.5 sm:py-2 text-base sm:text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition";
-  const inputErrCls = "w-full rounded-[1.5rem] border border-red-300 bg-red-50/30 backdrop-blur px-3 py-2.5 sm:py-2 text-base sm:text-sm text-gray-700 outline-none focus:border-red-400 focus:ring-4 focus:ring-red-100 transition";
-  const labelCls = "block text-xs font-black uppercase tracking-widest text-slate-500 mb-1";
   const errTextCls = "text-[11px] text-red-500 mt-1 flex items-center gap-1";
 
   return (
@@ -222,9 +310,12 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             <h2 className="text-lg font-bold text-gray-800">
               {mode === "add" ? "Add New Record" : "Edit Record"}
             </h2>
-            <button onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
-              <X size={18} className="text-gray-400" />
-            </button>
+            <div className="flex items-center gap-2">
+              <StatusBadge status={form.status as RecordStatus} />
+              <button onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
+                <X size={18} className="text-gray-400" />
+              </button>
+            </div>
           </div>
 
           {successMsg && (
@@ -246,24 +337,37 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             </div>
           )}
 
+          {archived && (
+            <div className="mb-4 rounded-2xl bg-slate-50 border border-slate-200/70 px-4 py-2.5 text-sm font-medium text-slate-600">
+              This record is archived and is read-only.
+            </div>
+          )}
+          {!archived && finalized && (
+            <div className="mb-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/50 px-4 py-2.5 text-sm font-medium text-emerald-700">
+              Finalized record: numeric evidence fields are locked for reporting integrity.
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Reporting Period */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelCls}>Reporting Month <span className="text-red-400">*</span></label>
+                <FieldLabel required>Reporting Month</FieldLabel>
                 <select
                   className={errors.period ? inputErrCls : inputCls}
                   value={form.period_month}
+                  disabled={archived}
                   onChange={(e) => { setForm((f) => ({ ...f, period_month: parseInt(e.target.value) })); if (submitted) setErrors((er) => ({ ...er, period: undefined })); }}
                 >
                   {MONTH_NAMES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                 </select>
               </div>
               <div>
-                <label className={labelCls}>Reporting Year <span className="text-red-400">*</span></label>
+                <FieldLabel required>Reporting Year</FieldLabel>
                 <select
                   className={errors.period ? inputErrCls : inputCls}
                   value={form.period_year}
+                  disabled={archived}
                   onChange={(e) => { setForm((f) => ({ ...f, period_year: parseInt(e.target.value) })); if (submitted) setErrors((er) => ({ ...er, period: undefined })); }}
                 >
                   {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
@@ -275,59 +379,78 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             {/* Barangay + Commodity */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelCls}>Barangay <span className="text-red-400">*</span></label>
+                <FieldLabel required>Barangay</FieldLabel>
                 {isBarangayUser ? (
                   <div className={inputCls + " flex items-center gap-2 bg-white/30 cursor-not-allowed"}>
                     <span className="text-gray-700 font-medium">{userBarangay}</span>
                     <span className="ml-auto text-[10px] text-gray-400">🔒 Assigned</span>
                   </div>
                 ) : (
-                  <select className={inputCls} value={form.barangay} onChange={(e) => setForm((f) => ({ ...f, barangay: e.target.value, farmer_ids: [] }))}>
+                  <select
+                    className={inputCls}
+                    disabled={archived}
+                    value={form.barangay}
+                    onChange={(e) => setForm((f) => ({ ...f, barangay: e.target.value, farmer_ids: [] }))}
+                  >
                     {availableBarangays.map((b) => <option key={b} value={b}>{b}</option>)}
                   </select>
                 )}
               </div>
               <div>
-                <label className={labelCls}>Commodity <span className="text-red-400">*</span></label>
-                <select className={errors.commodity ? inputErrCls : inputCls} value={form.commodity} onChange={(e) => handleCommodityChange(e.target.value as AgriRecord["commodity"])}>
+                <FieldLabel required>Commodity</FieldLabel>
+                <select
+                  disabled={archived}
+                  className={errors.commodity ? inputErrCls : inputCls}
+                  value={form.commodity}
+                  onChange={(e) => handleCommodityChange(e.target.value as AgriRecord["commodity"])}
+                >
                   {COMMODITY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
                 {errors.commodity && <p className={errTextCls}><AlertCircle size={11} /> {errors.commodity}</p>}
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Group: <span className="font-black text-slate-600">{group}</span>
+                </p>
               </div>
             </div>
 
-            {/* Lifecycle status */}
+            {/* Record status (Phase 2 canonical lifecycle). */}
             <div>
-              <label className={labelCls}>Lifecycle stage <span className="text-red-400">*</span></label>
+              <FieldLabel required>Status</FieldLabel>
               <select
-                className={errors.lifecycle_status ? inputErrCls : inputCls}
-                value={form.lifecycle_status}
+                className={errors.status ? inputErrCls : inputCls}
+                value={form.status}
+                disabled={archived}
                 onChange={(e) => {
-                  const next = e.target.value as LifecycleStatus;
-                  setForm((f) => ({ ...f, lifecycle_status: next }));
-                  if (submitted) setErrors((er) => ({ ...er, lifecycle_status: undefined }));
+                  const next = e.target.value as RecordStatus;
+                  setForm((f) => ({ ...f, status: next }));
+                  if (submitted) setErrors((er) => ({ ...er, status: undefined }));
                 }}
               >
-                {LIFECYCLE_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {LIFECYCLE_STATUS_LABELS[s]}
-                  </option>
-                ))}
+                {RECORD_STATUSES.map((s) => {
+                  const allowed = canTransition(savedStatus, s);
+                  return (
+                    <option key={s} value={s} disabled={!allowed}>
+                      {RECORD_STATUS_LABELS[s]}{!allowed ? " — not allowed from current status" : ""}
+                    </option>
+                  );
+                })}
               </select>
               <p className="mt-1 text-[10px] text-slate-400">
-                {form.lifecycle_status === "planted" && "Initial input — area/stocking only. Damage and harvest stay at 0."}
-                {form.lifecycle_status === "damaged" && "Mid-season damage logged. Harvest must remain 0 until the row is finalized."}
-                {form.lifecycle_status === "harvested" && "Final harvest captured. Only this status counts toward production totals."}
-                {form.lifecycle_status === "total_loss" && "Finalized with no harvest. The full planting area counts as damage."}
+                {RECORD_STATUS_DESCRIPTIONS[form.status as RecordStatus]}
               </p>
-              {errors.lifecycle_status && <p className={errTextCls}><AlertCircle size={11} /> {errors.lifecycle_status}</p>}
+              {errors.status && <p className={errTextCls}><AlertCircle size={11} /> {errors.status}</p>}
             </div>
 
             {/* Variety */}
             {!isCorn && subTypes.length > 0 && (
               <div>
-                <label className={labelCls}>Variety / Type</label>
-                <select className={inputCls} value={form.sub_category} onChange={(e) => setForm((f) => ({ ...f, sub_category: e.target.value }))}>
+                <FieldLabel>Variety / Type</FieldLabel>
+                <select
+                  className={inputCls}
+                  disabled={archived}
+                  value={form.sub_category}
+                  onChange={(e) => setForm((f) => ({ ...f, sub_category: e.target.value }))}
+                >
                   {subTypes.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
@@ -335,10 +458,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
             {/* Farmer Selection */}
             <div>
-              <label className={labelCls}>Farmers / Fisherfolks <span className="text-red-400">*</span></label>
+              <FieldLabel required>Farmers / Fisherfolks</FieldLabel>
               <button
                 type="button"
                 onClick={() => setFarmerSelectOpen(true)}
+                disabled={archived}
                 className={`flex w-full items-center gap-2 rounded-[1.5rem] border px-3 py-2 text-sm transition ${
                   errors.farmer_ids
                     ? "border-red-300 bg-red-50/30 text-red-500 hover:border-red-400"
@@ -356,7 +480,12 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                   {linkedFarmers.map((f) => (
                     <span key={f.id} className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${f.gender === "Male" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-500"}`}>
                       {f.name}
-                      <button type="button" onClick={() => { setForm((prev) => ({ ...prev, farmer_ids: prev.farmer_ids.filter((id) => id !== f.id) })); if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined })); }} className="ml-1 hover:text-red-500">
+                      <button
+                        type="button"
+                        disabled={archived}
+                        onClick={() => { setForm((prev) => ({ ...prev, farmer_ids: prev.farmer_ids.filter((id) => id !== f.id) })); if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined })); }}
+                        className="ml-1 hover:text-red-500 disabled:opacity-40"
+                      >
                         <X size={10} />
                       </button>
                     </span>
@@ -365,111 +494,69 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
               )}
             </div>
 
-            {/* Crop fields (hidden for Fishery) */}
-            {!isFishery && (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Planting Area (hectares)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={RECORD_LIMITS.AREA_MAX}
-                      step="0.01"
-                      className={errors.planting_area_hectares ? inputErrCls : inputCls}
-                      value={form.planting_area_hectares || ""}
-                      onChange={(e) => { setForm((f) => ({ ...f, planting_area_hectares: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, planting_area_hectares: undefined, damage_calamity_hectares: undefined })); }}
-                    />
-                    {errors.planting_area_hectares && <p className={errTextCls}><AlertCircle size={11} /> {errors.planting_area_hectares}</p>}
-                  </div>
-                  <div>
-                    <label className={labelCls}>Harvest Output (bags @ 40kg)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={RECORD_LIMITS.BAGS_MAX}
-                      step="0.01"
-                      className={errors.harvesting_output_bags ? inputErrCls : inputCls}
-                      value={form.harvesting_output_bags || ""}
-                      onChange={(e) => { setForm((f) => ({ ...f, harvesting_output_bags: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, harvesting_output_bags: undefined })); }}
-                    />
-                    {errors.harvesting_output_bags && <p className={errTextCls}><AlertCircle size={11} /> {errors.harvesting_output_bags}</p>}
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Damage -- Pests & Diseases (ha)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={RECORD_LIMITS.AREA_MAX}
-                      step="0.01"
-                      className={errors.damage_pests_hectares ? inputErrCls : inputCls}
-                      value={form.damage_pests_hectares || ""}
-                      onChange={(e) => { setForm((f) => ({ ...f, damage_pests_hectares: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, damage_pests_hectares: undefined, damage_calamity_hectares: undefined })); }}
-                    />
-                    {errors.damage_pests_hectares && <p className={errTextCls}><AlertCircle size={11} /> {errors.damage_pests_hectares}</p>}
-                  </div>
-                  <div>
-                    <label className={labelCls}>Damage -- Calamity (ha)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={RECORD_LIMITS.AREA_MAX}
-                      step="0.01"
-                      className={errors.damage_calamity_hectares ? inputErrCls : inputCls}
-                      value={form.damage_calamity_hectares || ""}
-                      onChange={(e) => { setForm((f) => ({ ...f, damage_calamity_hectares: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, damage_calamity_hectares: undefined })); }}
-                    />
-                    {errors.damage_calamity_hectares && <p className={errTextCls}><AlertCircle size={11} /> {errors.damage_calamity_hectares}</p>}
-                  </div>
-                </div>
-              </>
+            {/* Crop fields (hidden for Fishery + Livestock) */}
+            {!isFishery && !isLivestock && (
+              <CropFields
+                form={form}
+                setForm={(updater) => {
+                  setForm((prev) => {
+                    const next = typeof updater === "function" ? (updater as any)(prev) : updater;
+                    return next;
+                  });
+                }}
+                errors={errors as any}
+                locked={lockEvidenceFields}
+              />
             )}
 
-            {/* Fishery fields */}
+            {/* Fishery fields (pieces) */}
             {isFishery && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelCls}>Stocking</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={RECORD_LIMITS.STOCKING_MAX}
-                    step="0.01"
-                    className={errors.stocking ? inputErrCls : inputCls}
-                    value={form.stocking || ""}
-                    onChange={(e) => { setForm((f) => ({ ...f, stocking: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, stocking: undefined })); }}
-                  />
-                  {errors.stocking && <p className={errTextCls}><AlertCircle size={11} /> {errors.stocking}</p>}
-                </div>
-                <div>
-                  <label className={labelCls}>Harvesting (pieces)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={RECORD_LIMITS.FISHERY_HARVEST_MAX}
-                    step="0.01"
-                    className={errors.harvesting_fishery ? inputErrCls : inputCls}
-                    value={form.harvesting_fishery || ""}
-                    onChange={(e) => { setForm((f) => ({ ...f, harvesting_fishery: parseFloat(e.target.value) || 0 })); if (submitted) setErrors((er) => ({ ...er, harvesting_fishery: undefined })); }}
-                  />
-                  {errors.harvesting_fishery && <p className={errTextCls}><AlertCircle size={11} /> {errors.harvesting_fishery}</p>}
-                </div>
-              </div>
+              <FisheryFields
+                form={form}
+                setForm={(updater) => {
+                  setForm((prev) => {
+                    const next = typeof updater === "function" ? (updater as any)(prev) : updater;
+                    return next;
+                  });
+                }}
+                errors={errors as any}
+                locked={lockEvidenceFields}
+              />
+            )}
+
+            {/* Livestock fields (heads) */}
+            {isLivestock && (
+              <LivestockFields
+                form={form}
+                setForm={(updater) => {
+                  setForm((prev) => {
+                    const next = typeof updater === "function" ? (updater as any)(prev) : updater;
+                    return next;
+                  });
+                }}
+                errors={errors as any}
+                locked={lockEvidenceFields}
+              />
             )}
 
             {/* Pests & Calamity */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelCls}>Pests & Diseases</label>
-                <input className={inputCls} value={form.pests_diseases} onChange={(e) => setForm((f) => ({ ...f, pests_diseases: e.target.value }))} placeholder="e.g. Rice Blast, Stem Borer or None" />
+                <FieldLabel>Pests & Diseases</FieldLabel>
+                <input
+                  disabled={archived}
+                  className={inputCls}
+                  value={form.pests_diseases}
+                  onChange={(e) => setForm((f) => ({ ...f, pests_diseases: e.target.value }))}
+                  placeholder="e.g. Rice Blast, Stem Borer or None"
+                />
               </div>
               <div>
-                <label className={labelCls}>Calamity type</label>
+                <FieldLabel>Calamity type</FieldLabel>
                 <select
                   className={inputCls}
                   value={form.calamity_sub_category}
+                  disabled={archived || isFishery || isLivestock}
                   onChange={(e) => setForm((f) => ({ ...f, calamity_sub_category: e.target.value as CalamitySubCategory }))}
                 >
                   {CALAMITY_SUB_CATEGORIES.map((c) => (
@@ -480,10 +567,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
                 </select>
               </div>
               <div className="sm:col-span-2">
-                <label className={labelCls}>Calamity event or name</label>
+                <FieldLabel>Calamity event or name</FieldLabel>
                 <input
                   className={errors.calamity ? inputErrCls : inputCls}
                   value={form.calamity}
+                  disabled={archived || isFishery || isLivestock}
                   onChange={(e) => { setForm((f) => ({ ...f, calamity: e.target.value })); if (submitted) setErrors((er) => ({ ...er, calamity: undefined })); }}
                   placeholder="e.g. Typhoon Egay, barangay sitio — or None"
                 />
@@ -493,16 +581,25 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
             {/* Remarks */}
             <div>
-              <label className={labelCls}>Remarks (optional)</label>
-              <textarea className="w-full rounded-2xl border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition resize-none" rows={2} value={form.remarks} onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))} placeholder="Additional notes..." />
+              <FieldLabel>Remarks (optional)</FieldLabel>
+              <textarea
+                disabled={archived}
+                className="w-full rounded-2xl border border-slate-200/50 bg-white/50 backdrop-blur px-3 py-2 text-sm text-gray-700 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 transition resize-none disabled:opacity-60 disabled:cursor-not-allowed"
+                rows={2}
+                value={form.remarks}
+                onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
+                placeholder="Additional notes..."
+              />
             </div>
 
             {/* Actions */}
             <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
               <button type="button" onClick={onClose} className="w-full sm:w-auto rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-white/70 transition">{mode === "add" ? "Close" : "Cancel"}</button>
-              <button type="submit" disabled={saving} className={`w-full sm:w-auto rounded-[1.5rem] px-5 py-2.5 sm:py-2 text-sm font-black text-white shadow-lg transition ${saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"}`}>
-                {saving ? "Saving…" : mode === "add" ? "Add Record" : "Save Changes"}
-              </button>
+              {!archived ? (
+                <button type="submit" disabled={saving} className={`w-full sm:w-auto rounded-[1.5rem] px-5 py-2.5 sm:py-2 text-sm font-black text-white shadow-lg transition ${saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"}`}>
+                  {saving ? "Saving…" : mode === "add" ? "Add Record" : "Save Changes"}
+                </button>
+              ) : null}
             </div>
           </form>
         </div>
@@ -515,7 +612,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
         onClose={() => setFarmerSelectOpen(false)}
         barangay={form.barangay}
         selectedIds={form.farmer_ids}
-        onConfirm={(ids) => { setForm((f) => ({ ...f, farmer_ids: ids })); if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined })); }}
+        onConfirm={(ids) => {
+          if (archived) return;
+          setForm((f) => ({ ...f, farmer_ids: ids }));
+          if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined }));
+        }}
       />
     </>
   );

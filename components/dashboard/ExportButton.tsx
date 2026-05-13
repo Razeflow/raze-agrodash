@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Download, FileText, Table2, CalendarDays, MapPin, Printer, FileBarChart } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
-import { MONTH_NAMES, formatHouseholdSubsidySummary, productionOutputForRecord } from "@/lib/data";
+import { MONTH_NAMES, formatHouseholdSubsidySummary, productionOutputForRecord, summarizeHarvestOutput } from "@/lib/data";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 
 function SectionLabel({ text }: { text: string }) {
@@ -75,7 +75,7 @@ export default function ExportButton() {
 
   // ── CSV Exports ────────────────────────────────────────────────────────
   function exportRecordsCSV() {
-    const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest (bags/units)", "Damage Pests (ha)", "Damage Calamity (ha)", "Stocking", "Fishery Harvest", "Pests/Diseases", "CalamitySubCategory", "CalamityEvent", "Remarks", "Created"];
+    const headers = ["Barangay", "Commodity", "Sub-category", "Male", "Female", "Total", "Planting Area (ha)", "Harvest output (bags | fish | heads)", "Damage Pests (ha)", "Damage Calamity (ha)", "Fish stocked", "Fishery harvest (fish)", "Pests/Diseases", "CalamitySubCategory", "CalamityEvent", "Remarks", "Created"];
     const rows = filteredRecords.map((r) => [
       r.barangay, r.commodity, r.sub_category,
       r.farmer_male, r.farmer_female, r.total_farmers,
@@ -123,12 +123,30 @@ export default function ExportButton() {
 
   function exportMonthlySummaryCSV() {
     const grouped = groupBy(filteredRecords, (r) => `${r.created_at.slice(0, 7)}|${r.barangay}`);
-    const headers = ["Month", "Barangay", "Records", "Farmers", "Harvest (bags)", "Area (ha)", "Damage (ha)"];
+    const headers = [
+      "Month",
+      "Barangay",
+      "Records",
+      "Farmers",
+      "Crop harvest (bags)",
+      "Fishery (fish)",
+      "Livestock (heads)",
+      "Crop MT (est.)",
+      "Area (ha)",
+      "Damage (ha)",
+    ];
     const rows = Object.entries(grouped).map(([key, group]) => {
       const [month, barangay] = key.split("|");
-      return [month, barangay, group.length,
+      const h = summarizeHarvestOutput(group);
+      return [
+        month,
+        barangay,
+        group.length,
         group.reduce((s, r) => s + r.total_farmers, 0),
-        group.reduce((s, r) => s + productionOutputForRecord(r), 0),
+        h.cropBags,
+        h.fisheryFish,
+        h.livestockHeads,
+        (h.cropBags * 0.04).toFixed(2),
         group.reduce((s, r) => s + r.planting_area_hectares, 0).toFixed(2),
         group.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0).toFixed(2),
       ].join(",");
@@ -139,15 +157,43 @@ export default function ExportButton() {
 
   function exportBarangaySummaryCSV() {
     const grouped = groupBy(filteredRecords, (r) => r.barangay);
-    const headers = ["Barangay", "Records", "Male", "Female", "Total", "Harvest (bags)", "MT", "Area (ha)", "Damage (ha)", "Damage %", "Last Updated"];
+    const headers = [
+      "Barangay",
+      "Records",
+      "Male",
+      "Female",
+      "Total",
+      "Crop harvest (bags)",
+      "Fishery (fish)",
+      "Livestock (heads)",
+      "Crop MT (est.)",
+      "Area (ha)",
+      "Damage (ha)",
+      "Damage %",
+      "Last Updated",
+    ];
     const rows = Object.entries(grouped).map(([barangay, group]) => {
       const male = group.reduce((s, r) => s + r.farmer_male, 0);
       const female = group.reduce((s, r) => s + r.farmer_female, 0);
-      const harvest = group.reduce((s, r) => s + productionOutputForRecord(r), 0);
+      const h = summarizeHarvestOutput(group);
       const area = group.reduce((s, r) => s + r.planting_area_hectares, 0);
       const dmg = group.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
       const lastUpdated = group.reduce((latest, r) => r.created_at > latest ? r.created_at : latest, group[0].created_at).slice(0, 10);
-      return [barangay, group.length, male, female, male + female, harvest, (harvest * 0.04).toFixed(2), area.toFixed(2), dmg.toFixed(2), area > 0 ? ((dmg / area) * 100).toFixed(1) : "0", lastUpdated].join(",");
+      return [
+        barangay,
+        group.length,
+        male,
+        female,
+        male + female,
+        h.cropBags,
+        h.fisheryFish,
+        h.livestockHeads,
+        (h.cropBags * 0.04).toFixed(2),
+        area.toFixed(2),
+        dmg.toFixed(2),
+        area > 0 ? ((dmg / area) * 100).toFixed(1) : "0",
+        lastUpdated,
+      ].join(",");
     });
     downloadBlob([headers.join(","), ...rows].join("\n"), `agridash-barangay-summary${fileSuffix}.csv`, "text/csv");
     setOpen(false);

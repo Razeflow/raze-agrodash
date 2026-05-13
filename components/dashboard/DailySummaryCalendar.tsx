@@ -1,10 +1,10 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Calendar, Plus, UserPlus, MapPin, AlertTriangle } from "lucide-react";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
-import { COMMODITY_COLORS, BARANGAYS } from "@/lib/data";
 import type { AgriRecord } from "@/lib/data";
+import { COMMODITY_COLORS, BARANGAYS, summarizeHarvestOutput } from "@/lib/data";
 import RecordFormDialog from "./RecordFormDialog";
 import FarmerFormDialog from "./FarmerFormDialog";
 import BentoCard from "@/components/ui/BentoCard";
@@ -266,8 +266,22 @@ export default function DailySummaryCalendar({
                 </div>
                 <div className="rounded-2xl bg-amber-50/50 backdrop-blur border border-amber-100/50 p-4 text-center">
                   <p className="text-[10px] font-black uppercase tracking-widest text-amber-600">Harvest</p>
-                  <p className="text-3xl font-black text-amber-700">{selectedRecords.reduce((s, r) => s + r.harvesting_output_bags, 0).toLocaleString()}</p>
-                  <p className="text-[10px] font-bold text-slate-400">bags</p>
+                  {(() => {
+                    const { cropBags, fisheryFish, livestockHeads } = summarizeHarvestOutput(selectedRecords);
+                    const lines: ReactNode[] = [];
+                    if (cropBags > 0) lines.push(<span key="b" className="block text-lg font-black leading-tight text-amber-700">{cropBags.toLocaleString()} <span className="text-[10px] font-bold text-slate-500">bags</span></span>);
+                    if (fisheryFish > 0) lines.push(<span key="f" className="block text-lg font-black leading-tight text-sky-700">{fisheryFish.toLocaleString()} <span className="text-[10px] font-bold text-slate-500">fish</span></span>);
+                    if (livestockHeads > 0) lines.push(<span key="h" className="block text-lg font-black leading-tight text-violet-700">{livestockHeads.toLocaleString()} <span className="text-[10px] font-bold text-slate-500">heads</span></span>);
+                    if (lines.length === 0) {
+                      return (
+                        <>
+                          <p className="text-3xl font-black text-amber-700">0</p>
+                          <p className="text-[10px] font-bold text-slate-400">finalized harvest only</p>
+                        </>
+                      );
+                    }
+                    return <div className="space-y-1 pt-0.5">{lines}</div>;
+                  })()}
                 </div>
               </div>
 
@@ -282,7 +296,7 @@ export default function DailySummaryCalendar({
               ) : (
                 <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
                   {grouped.map(([barangay, recs]) => {
-                    const totalBags = recs.reduce((s, r) => s + r.harvesting_output_bags, 0);
+                    const hOut = summarizeHarvestOutput(recs);
                     const totalArea = recs.reduce((s, r) => s + r.planting_area_hectares, 0);
                     const totalDmg = recs.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
                     const commodities = [...new Set(recs.map((r) => r.commodity))];
@@ -293,9 +307,11 @@ export default function DailySummaryCalendar({
                             <MapPin size={14} className="text-emerald-600" />
                             <p className="text-sm font-black text-slate-700">{barangay}</p>
                           </div>
-                          <div className="flex gap-3 text-[10px] font-bold text-slate-400">
+                          <div className="flex flex-wrap justify-end gap-x-3 gap-y-1 text-[10px] font-bold text-slate-400">
                             <span>{recs.length} entries</span>
-                            {totalBags > 0 && <span className="text-emerald-600">{totalBags.toLocaleString()} bags</span>}
+                            {hOut.cropBags > 0 && <span className="text-emerald-600">{hOut.cropBags.toLocaleString()} bags</span>}
+                            {hOut.fisheryFish > 0 && <span className="text-sky-600">{hOut.fisheryFish.toLocaleString()} fish</span>}
+                            {hOut.livestockHeads > 0 && <span className="text-violet-600">{hOut.livestockHeads.toLocaleString()} heads</span>}
                             {totalArea > 0 && <span>{totalArea.toFixed(1)} ha</span>}
                             {totalDmg > 0 && <span className="text-red-500">{totalDmg.toFixed(1)} ha dmg</span>}
                           </div>
@@ -326,9 +342,44 @@ export default function DailySummaryCalendar({
                                   </div>
                                 </div>
                                 <div className="text-right flex-shrink-0 ml-3">
-                                  {r.harvesting_output_bags > 0 && <p className="font-mono text-xs font-black text-emerald-600">{r.harvesting_output_bags.toLocaleString()} bags</p>}
-                                  {r.planting_area_hectares > 0 && <p className="text-[10px] font-medium text-slate-400">{r.planting_area_hectares} ha</p>}
-                                  {r.commodity === "Fishery" && r.harvesting_fishery > 0 && <p className="font-mono text-xs font-black text-blue-600">{r.harvesting_fishery.toLocaleString()} pcs</p>}
+                                  {r.commodity === "Fishery" ? (
+                                    <>
+                                      {r.stocking > 0 && (
+                                        <p className="font-mono text-[10px] font-bold text-slate-500">
+                                          stock {r.stocking.toLocaleString()} fish
+                                        </p>
+                                      )}
+                                      {r.harvesting_fishery > 0 && (
+                                        <p className="font-mono text-xs font-black text-sky-600">
+                                          {r.harvesting_fishery.toLocaleString()} fish
+                                        </p>
+                                      )}
+                                    </>
+                                  ) : r.commodity === "Livestock" ? (
+                                    <>
+                                      {(r.livestock_stocking_heads ?? 0) > 0 && (
+                                        <p className="font-mono text-[10px] font-bold text-slate-500">
+                                          stock {(r.livestock_stocking_heads ?? 0).toLocaleString()} hd
+                                        </p>
+                                      )}
+                                      {(r.livestock_output_heads ?? 0) > 0 && (
+                                        <p className="font-mono text-xs font-black text-violet-600">
+                                          {(r.livestock_output_heads ?? 0).toLocaleString()} heads
+                                        </p>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {r.harvesting_output_bags > 0 && (
+                                        <p className="font-mono text-xs font-black text-emerald-600">
+                                          {r.harvesting_output_bags.toLocaleString()} bags
+                                        </p>
+                                      )}
+                                      {r.planting_area_hectares > 0 && (
+                                        <p className="text-[10px] font-medium text-slate-400">{r.planting_area_hectares} ha</p>
+                                      )}
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -367,17 +418,19 @@ export default function DailySummaryCalendar({
                 <div className="space-y-3">
                   {grouped.map(([barangay, recs]) => {
                     const totalFarmers = recs.reduce((s, r) => s + r.total_farmers, 0);
-                    const totalBags = recs.reduce((s, r) => s + r.harvesting_output_bags, 0);
+                    const hOut = summarizeHarvestOutput(recs);
                     const commodities = [...new Set(recs.map((r) => r.commodity))];
                     return (
                       <div key={barangay} className="rounded-2xl bg-white/50 backdrop-blur border border-white/30 overflow-hidden">
                         <div className="flex items-center justify-between bg-slate-50/50 px-4 py-3">
                           <div>
                             <p className="text-sm font-black text-slate-700">{barangay}</p>
-                            <div className="flex gap-2 text-[10px] font-bold text-slate-400 mt-0.5">
+                            <div className="flex flex-wrap gap-x-2 gap-y-1 text-[10px] font-bold text-slate-400 mt-0.5">
                               <span>{recs.length} {recs.length === 1 ? "entry" : "entries"}</span>
                               <span>{totalFarmers} farmers</span>
-                              {totalBags > 0 && <span>{totalBags.toLocaleString()} bags</span>}
+                              {hOut.cropBags > 0 && <span className="text-emerald-600">{hOut.cropBags.toLocaleString()} bags</span>}
+                              {hOut.fisheryFish > 0 && <span className="text-sky-600">{hOut.fisheryFish.toLocaleString()} fish</span>}
+                              {hOut.livestockHeads > 0 && <span className="text-violet-600">{hOut.livestockHeads.toLocaleString()} heads</span>}
                             </div>
                           </div>
                         </div>
@@ -399,8 +452,26 @@ export default function DailySummaryCalendar({
                                 </div>
                               </div>
                               <div className="text-right flex-shrink-0 ml-2">
-                                {r.harvesting_output_bags > 0 && <p className="font-mono text-xs font-black text-emerald-600">{r.harvesting_output_bags.toLocaleString()} bags</p>}
-                                {r.planting_area_hectares > 0 && <p className="text-[10px] font-medium text-slate-400">{r.planting_area_hectares} ha</p>}
+                                {r.commodity === "Fishery" ? (
+                                  r.harvesting_fishery > 0 && (
+                                    <p className="font-mono text-xs font-black text-sky-600">{r.harvesting_fishery.toLocaleString()} fish</p>
+                                  )
+                                ) : r.commodity === "Livestock" ? (
+                                  (r.livestock_output_heads ?? 0) > 0 && (
+                                    <p className="font-mono text-xs font-black text-violet-600">
+                                      {(r.livestock_output_heads ?? 0).toLocaleString()} heads
+                                    </p>
+                                  )
+                                ) : (
+                                  <>
+                                    {r.harvesting_output_bags > 0 && (
+                                      <p className="font-mono text-xs font-black text-emerald-600">{r.harvesting_output_bags.toLocaleString()} bags</p>
+                                    )}
+                                    {r.planting_area_hectares > 0 && (
+                                      <p className="text-[10px] font-medium text-slate-400">{r.planting_area_hectares} ha</p>
+                                    )}
+                                  </>
+                                )}
                               </div>
                             </div>
                           ))}

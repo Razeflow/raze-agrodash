@@ -5,20 +5,39 @@ import {
   convertMillimetersToTwip,
 } from "docx";
 import type { AgriRecord, Farmer } from "./data";
-import { BARANGAYS, COMMODITY_COLORS, productionOutputForRecord } from "./data";
+import { BARANGAYS, COMMODITY_COLORS, numField } from "./data";
+import { recordGroup, recordStatus } from "@/lib/domain/metrics";
 
 // ── Types for the export function ─────────────────────────────────────────────
 type ExportData = {
   records: AgriRecord[];
   farmers: Farmer[];
   totalFarmers: { male: number; female: number; total: number };
-  totalProduction: { bags: number; tons: number };
+  totalProduction: { cropBags: number; cropTons: number; fisheryPieces: number; livestockHeads: number };
   totalPlantingArea: number;
   totalDamagedArea: number;
   mostProducedCommodity: string;
   productionByCommodity: { name: string; bags: number; tons: number }[];
   damageByCommodity: { name: string; area: number }[];
 };
+
+function cropBagsForRecord(r: AgriRecord): number {
+  if (recordGroup(r as any) !== "CROP") return 0;
+  if (recordStatus(r as any) !== "harvested") return 0;
+  return numField(r.harvesting_output_bags);
+}
+
+function fisheryPiecesForRecord(r: AgriRecord): number {
+  if (recordGroup(r as any) !== "FISHERY") return 0;
+  if (recordStatus(r as any) !== "harvested") return 0;
+  return numField(r.harvesting_fishery);
+}
+
+function livestockHeadsForRecord(r: AgriRecord): number {
+  if (recordGroup(r as any) !== "LIVESTOCK") return 0;
+  if (recordStatus(r as any) !== "harvested") return 0;
+  return numField(r.livestock_output_heads);
+}
 
 // ── Canvas chart renderers ────────────────────────────────────────────────────
 function renderBarChart(
@@ -265,7 +284,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
     const brgyRecords = records.filter((r) => r.barangay === b);
     return {
       label: b,
-      value: brgyRecords.reduce((s, r) => s + productionOutputForRecord(r), 0),
+      value: brgyRecords.reduce((s, r) => s + cropBagsForRecord(r), 0),
       color: "#16a34a",
     };
   });
@@ -332,7 +351,9 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
         }),
         new TableRow({ children: [dataCell("Total Records"), numCell(records.length)] }),
         new TableRow({ children: [dataCell("Total Farmers"), numCell(`${totalFarmers.total} (${totalFarmers.male}M / ${totalFarmers.female}F)`)] }),
-        new TableRow({ children: [dataCell("Total Production"), numCell(`${totalProduction.bags.toLocaleString()} bags (${totalProduction.tons} MT)`)] }),
+        new TableRow({ children: [dataCell("Crop production"), numCell(`${totalProduction.cropBags.toLocaleString()} bags (${totalProduction.cropTons} MT)`)] }),
+        new TableRow({ children: [dataCell("Fishery production"), numCell(`${totalProduction.fisheryPieces.toLocaleString()} fish`)] }),
+        new TableRow({ children: [dataCell("Livestock output"), numCell(`${totalProduction.livestockHeads.toLocaleString()} heads`)] }),
         new TableRow({ children: [dataCell("Total Planting Area"), numCell(`${totalPlantingArea} hectares`)] }),
         new TableRow({ children: [dataCell("Total Damaged Area"), numCell(`${totalDamagedArea} hectares`)] }),
         new TableRow({ children: [dataCell("Damage Percentage"), numCell(`${totalPlantingArea > 0 ? ((totalDamagedArea / totalPlantingArea) * 100).toFixed(1) : 0}%`)] }),
@@ -484,7 +505,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
   for (const brgy of BARANGAYS) {
     const brgyRecords = records.filter((r) => r.barangay === brgy);
     const brgyFarmers = farmers.filter((f) => f.barangay === brgy);
-    const brgyBags = brgyRecords.reduce((s, r) => s + productionOutputForRecord(r), 0);
+    const brgyBags = brgyRecords.reduce((s, r) => s + cropBagsForRecord(r), 0);
     const brgyArea = brgyRecords.reduce((s, r) => s + r.planting_area_hectares, 0);
     const brgyDmg = brgyRecords.reduce((s, r) => s + r.damage_pests_hectares + r.damage_calamity_hectares, 0);
     const brgyMale = brgyFarmers.filter((f) => f.gender === "Male").length;
@@ -492,7 +513,10 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
 
     // Per-barangay commodity chart
     const commodityBreakdown: Record<string, number> = {};
-    brgyRecords.forEach((r) => { commodityBreakdown[r.commodity] = (commodityBreakdown[r.commodity] || 0) + productionOutputForRecord(r); });
+    brgyRecords.forEach((r) => {
+      if (r.commodity === "Fishery" || r.commodity === "Livestock") return;
+      commodityBreakdown[r.commodity] = (commodityBreakdown[r.commodity] || 0) + cropBagsForRecord(r);
+    });
     const brgyCommodityData = Object.entries(commodityBreakdown).map(([name, bags]) => ({
       label: name,
       value: bags,
@@ -514,7 +538,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
           new TableRow({ children: [headerCell("Metric"), headerCell("Value")] }),
           new TableRow({ children: [dataCell("Registered Farmers"), numCell(`${brgyFarmers.length} (${brgyMale}M / ${brgyFemale}F)`)] }),
           new TableRow({ children: [dataCell("Commodity Records"), numCell(brgyRecords.length)] }),
-          new TableRow({ children: [dataCell("Total Harvest"), numCell(`${brgyBags.toLocaleString()} bags (${(brgyBags * 0.04).toFixed(2)} MT)`)] }),
+          new TableRow({ children: [dataCell("Crop harvest"), numCell(`${brgyBags.toLocaleString()} bags (${(brgyBags * 0.04).toFixed(2)} MT)`)] }),
           new TableRow({ children: [dataCell("Planting Area"), numCell(`${brgyArea.toFixed(2)} ha`)] }),
           new TableRow({ children: [dataCell("Damaged Area"), numCell(`${brgyDmg.toFixed(2)} ha`)] }),
         ],
@@ -551,7 +575,7 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
                 headerCell("Variety"),
                 headerCell("Farmers"),
                 headerCell("Area (ha)"),
-                headerCell("Harvest"),
+                headerCell("Output"),
                 headerCell("Damage (ha)"),
               ],
             }),
@@ -563,7 +587,13 @@ export async function generateDocxReport(data: ExportData): Promise<void> {
                   dataCell(r.sub_category),
                   numCell(r.total_farmers),
                   numCell(r.commodity === "Fishery" ? "—" : r.planting_area_hectares.toFixed(2)),
-                  numCell(r.commodity === "Fishery" ? `${productionOutputForRecord(r)} pcs` : r.harvesting_output_bags.toLocaleString()),
+                  numCell(
+                    r.commodity === "Fishery"
+                      ? `${fisheryPiecesForRecord(r)} fish`
+                      : r.commodity === "Livestock"
+                        ? `${livestockHeadsForRecord(r)} heads`
+                        : numField(r.harvesting_output_bags).toLocaleString(),
+                  ),
                   numCell(dmg > 0 ? dmg.toFixed(2) : "—"),
                 ],
               });

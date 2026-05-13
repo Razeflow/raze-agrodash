@@ -318,7 +318,7 @@ All Recharts components updated for glass background contrast:
 
 | Layer | Files | Status |
 |-------|-------|--------|
-| Data context | `lib/agri-context.tsx` | Untouched |
+| Data context | `lib/agri-context.tsx` | Updated post-redesign |
 | Auth context | `lib/auth-context.tsx` | Untouched |
 | Auth credentials | `lib/auth.ts` | Untouched |
 | Supabase client | `lib/supabase.ts` | Untouched |
@@ -330,6 +330,12 @@ All Recharts components updated for glass background contrast:
 | Utility functions | `lib/utils.ts` | Untouched |
 
 All CRUD operations, role-based access control, barangay filtering, export/print functionality, and real-time data sync remain identical.
+
+### 8.1 Post-redesign functional additions (April–May 2026)
+
+After the UI redesign shipped, the following **behavioral** features were added:
+
+- **Default alphabetical sorting** across user-facing lists and dropdowns (case-insensitive; ignores leading/trailing spaces).\n+- **Programs**: per-page pagination for households and organizations.\n+- **Organizations**: clickable member counts open a members modal with deep-linking to the farmer registry.\n+- **Safety**: confirmation dialogs for destructive actions (type-to-confirm for org/household deletes).
 
 ---
 

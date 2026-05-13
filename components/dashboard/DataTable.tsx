@@ -10,7 +10,13 @@ import {
   BARANGAYS,
   CALAMITY_SUB_CATEGORY_LABELS,
 } from "@/lib/data";
-import type { AgriRecord, LifecycleStatus } from "@/lib/data";
+import type { AgriRecord } from "@/lib/data";
+import {
+  RECORD_STATUS_LABELS,
+  RECORD_STATUS_CHIP_STYLES,
+  type RecordStatus,
+} from "@/lib/domain/status";
+import { recordStatus } from "@/lib/domain/metrics";
 import {
   Search, Filter, Plus, Pencil, Trash2, CalendarDays, MapPin, Calendar, X,
   Table2, Wheat, BarChart3,
@@ -33,24 +39,10 @@ function CommodityBadge({ name }: { name: string }) {
   );
 }
 
-const STATUS_CHIP_STYLES: Record<LifecycleStatus, string> = {
-  planted: "bg-sky-50 text-sky-700",
-  damaged: "bg-amber-50 text-amber-700",
-  harvested: "bg-emerald-50 text-emerald-700",
-  total_loss: "bg-red-50 text-red-700",
-};
-
-const STATUS_CHIP_LABELS: Record<LifecycleStatus, string> = {
-  planted: "Planted",
-  damaged: "Damaged",
-  harvested: "Harvested",
-  total_loss: "Total loss",
-};
-
-function StatusChip({ status }: { status: LifecycleStatus }) {
+function StatusChip({ status }: { status: RecordStatus }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_CHIP_STYLES[status]}`}>
-      {STATUS_CHIP_LABELS[status]}
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${RECORD_STATUS_CHIP_STYLES[status]}`}>
+      {RECORD_STATUS_LABELS[status]}
     </span>
   );
 }
@@ -351,7 +343,7 @@ export default function DataTable() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <CommodityBadge name={r.commodity} />
-                          <StatusChip status={r.lifecycle_status} />
+                          <StatusChip status={recordStatus(r as any)} />
                           <span className="text-sm font-semibold text-slate-700 truncate">{r.barangay}</span>
                           {r.sub_category && (
                             <span className="text-xs text-slate-500 truncate">· {r.sub_category}</span>
@@ -387,11 +379,11 @@ export default function DataTable() {
                           <>
                             <div className="text-right">
                               <p className="font-mono font-bold text-cyan-600">{r.stocking.toLocaleString()}</p>
-                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stock</p>
+                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Stock fish</p>
                             </div>
                             <div className="text-right">
                               <p className="font-mono font-semibold text-emerald-600">{r.harvesting_fishery.toLocaleString()}</p>
-                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Pieces</p>
+                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Fish</p>
                             </div>
                           </>
                         ) : (

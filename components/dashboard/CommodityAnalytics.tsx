@@ -5,7 +5,8 @@ import {
 } from "recharts";
 import type { PieLabelRenderProps } from "recharts";
 import { useAgriData } from "@/lib/agri-context";
-import { COMMODITY_COLORS, productionOutputForRecord } from "@/lib/data";
+import { COMMODITY_COLORS, numField } from "@/lib/data";
+import { filterRecords, recordGroup, recordStatus } from "@/lib/domain/metrics";
 import BentoCard from "@/components/ui/BentoCard";
 import { BarChart3, PieChart as PieChartIcon } from "lucide-react";
 
@@ -72,20 +73,17 @@ export default function CommodityAnalytics({
 
   const data = isFiltered
     ? (() => {
-        const fromTs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : null;
-        const toTs = dateTo ? new Date(dateTo + "T00:00:00").getTime() + 86_400_000 : null;
+        const fr = filterRecords(records as any, {
+          barangay: isBarangayFiltered ? barangayFilter : undefined,
+          dateFrom,
+          dateTo,
+        });
         const t: Record<string, number> = {};
-        records
-          .filter((r) => {
-            if (isBarangayFiltered && r.barangay !== barangayFilter) return false;
-            const created = new Date(r.created_at).getTime();
-            if (fromTs !== null && created < fromTs) return false;
-            if (toTs !== null && created >= toTs) return false;
-            return true;
-          })
-          .forEach((r) => {
-            t[r.commodity] = (t[r.commodity] || 0) + productionOutputForRecord(r);
-          });
+        fr.forEach((r) => {
+          if (recordGroup(r as any) !== "CROP") return;
+          if (recordStatus(r as any) !== "harvested") return;
+          t[r.commodity] = (t[r.commodity] || 0) + numField(r.harvesting_output_bags);
+        });
         return Object.entries(t).map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }));
       })()
     : productionByCommodity;
@@ -103,7 +101,7 @@ export default function CommodityAnalytics({
       <BentoCard
         variant="compact"
         title="Production by Commodity"
-        subtitle="Output in bags (40 kg each)"
+        subtitle="Crops only · Output in bags (40 kg each)"
         icon={BarChart3}
         className="fade-up delay-1 lg:col-span-2"
       >
@@ -137,7 +135,7 @@ export default function CommodityAnalytics({
               ))}
             </Pie>
             <Legend formatter={(value) => <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>{value}</span>} iconSize={10} iconType="circle" />
-            <Tooltip formatter={(value) => [`${Number(value).toLocaleString()} bags`, "Production"]} contentStyle={tooltipStyle} />
+            <Tooltip formatter={(value) => [`${Number(value).toLocaleString()} bags`, "Crop production"]} contentStyle={tooltipStyle} />
           </PieChart>
         </ResponsiveContainer>
       </BentoCard>

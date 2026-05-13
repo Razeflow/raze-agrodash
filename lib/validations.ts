@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CALAMITY_SUB_CATEGORIES, COMMODITY_OPTIONS, BARANGAYS, LIFECYCLE_STATUSES } from "./data";
+import { commodityGroupForCommodity, RECORD_STATUSES } from "@/lib/domain";
 
 /**
  * Sanity bounds for numeric record fields. These mirror the Postgres CHECK
@@ -31,11 +32,19 @@ const bags = (label: string, max = RECORD_LIMITS.BAGS_MAX) =>
     .min(0, `${label} cannot be negative`)
     .max(max, `${label} looks too large (max ${max.toLocaleString()})`);
 
+/** Fish counts (stocking / harvest / loss) — same numeric bounds as bags but correct wording. */
+const fishCount = (label: string, max = RECORD_LIMITS.FISHERY_HARVEST_MAX) =>
+  z
+    .number({ error: `${label} must be a number` })
+    .min(0, `${label} cannot be negative`)
+    .max(max, `${label} looks too large (max ${max.toLocaleString()} fish)`);
+
 // Zod v4 enums require a literal tuple. Cast the readonly arrays at call site.
 const BARANGAY_VALUES = [...BARANGAYS] as [string, ...string[]];
 const COMMODITY_VALUES = [...COMMODITY_OPTIONS] as [string, ...string[]];
 const CALAMITY_VALUES = [...CALAMITY_SUB_CATEGORIES] as [string, ...string[]];
 const LIFECYCLE_VALUES = [...LIFECYCLE_STATUSES] as [string, ...string[]];
+const STATUS_VALUES = [...RECORD_STATUSES] as [string, ...string[]];
 
 // Floating-point slack for area sums (avoid 4.99999 > 5.00 false positives).
 const FP_EPS = 1e-6;
@@ -67,18 +76,24 @@ export const recordFormSchema = z
     harvesting_output_bags: bags("Harvest output"),
     damage_pests_hectares: ha("Pests damage"),
     damage_calamity_hectares: ha("Calamity damage"),
-    stocking: bags("Stocking", RECORD_LIMITS.STOCKING_MAX),
-    harvesting_fishery: bags("Harvesting (fishery)", RECORD_LIMITS.FISHERY_HARVEST_MAX),
+    stocking: fishCount("Fish stocked", RECORD_LIMITS.STOCKING_MAX),
+    harvesting_fishery: fishCount("Harvest (fish)", RECORD_LIMITS.FISHERY_HARVEST_MAX),
+    fishery_loss_pieces: fishCount("Fish lost", RECORD_LIMITS.FISHERY_HARVEST_MAX).optional().default(0),
+    livestock_stocking_heads: bags("Stocking (livestock)", RECORD_LIMITS.STOCKING_MAX).optional().default(0),
+    livestock_output_heads: bags("Output (livestock)", RECORD_LIMITS.BAGS_MAX).optional().default(0),
+    livestock_dead_heads: bags("Dead (livestock)", RECORD_LIMITS.BAGS_MAX).optional().default(0),
     pests_diseases: z.string().max(500, "Pests notes too long"),
     calamity: z.string().max(500, "Calamity notes too long"),
     calamity_sub_category: z.enum(CALAMITY_VALUES),
     remarks: z.string().max(2_000, "Remarks too long"),
     lifecycle_status: z.enum(LIFECYCLE_VALUES, { error: "Pick a lifecycle status" }),
+    /** Phase 2 canonical status. Drives validation; legacy `lifecycle_status` is derived on submit. */
+    status: z.enum(STATUS_VALUES, { error: "Pick a record status" }),
   })
   .superRefine((val, ctx) => {
-    // Cross-field: damage cannot exceed planting area (skip for Fishery — those
-    // fields are reset to 0 anyway, but the check naturally passes for 0+0<=0).
-    if (val.commodity !== "Fishery") {
+    const group = commodityGroupForCommodity(val.commodity as any);
+    // Cross-field: crop damage cannot exceed planting area.
+    if (group === "CROP") {
       const totalDamage = val.damage_pests_hectares + val.damage_calamity_hectares;
       if (totalDamage > val.planting_area_hectares + FP_EPS) {
         ctx.addIssue({
@@ -98,54 +113,76 @@ export const recordFormSchema = z
     }
 
     // ── Lifecycle consistency: status is the contract; numbers are evidence.
-    const isFishery = val.commodity === "Fishery";
-    const harvest = isFishery ? val.harvesting_fishery : val.harvesting_output_bags;
-    const totalDamage = isFishery
-      ? 0
-      : val.damage_pests_hectares + val.damage_calamity_hectares;
-    const baseSize = isFishery ? val.stocking : val.planting_area_hectares;
+    const harvest =
+      group === "FISHERY"
+        ? val.harvesting_fishery
+        : group === "LIVESTOCK"
+          ? val.livestock_output_heads ?? 0
+          : val.harvesting_output_bags;
+    const totalDamage =
+      group === "CROP"
+        ? val.damage_pests_hectares + val.damage_calamity_hectares
+        : group === "FISHERY"
+          ? val.fishery_loss_pieces ?? 0
+          : val.livestock_dead_heads ?? 0;
+    const baseSize =
+      group === "CROP" ? val.planting_area_hectares : group === "FISHERY" ? val.stocking : val.livestock_stocking_heads ?? 0;
 
     // Every record needs a non-zero base size, regardless of status.
     if (baseSize <= 0) {
       ctx.addIssue({
         code: "custom",
-        path: [isFishery ? "stocking" : "planting_area_hectares"],
-        message: isFishery
-          ? "Stocking is required"
-          : "Planting area is required",
+        path: [
+          group === "FISHERY"
+            ? "stocking"
+            : group === "LIVESTOCK"
+              ? "livestock_stocking_heads"
+              : "planting_area_hectares",
+        ],
+        message:
+          group === "FISHERY"
+            ? "Stocking is required"
+            : group === "LIVESTOCK"
+              ? "Livestock stocking is required"
+              : "Planting area is required",
       });
     }
 
-    switch (val.lifecycle_status) {
-      case "planted":
+    // Domain: fishery is fish-count only, livestock uses heads; no hectares/bags fields should be used.
+    if (group === "FISHERY") {
+      if (val.planting_area_hectares > 0 || val.harvesting_output_bags > 0 || val.damage_pests_hectares > 0 || val.damage_calamity_hectares > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["commodity"],
+          message: "Fishery records use fish counts only (no hectares or crop harvest bags).",
+        });
+      }
+    }
+    if (group === "LIVESTOCK") {
+      if (val.planting_area_hectares > 0 || val.harvesting_output_bags > 0 || val.damage_pests_hectares > 0 || val.damage_calamity_hectares > 0 || val.stocking > 0 || val.harvesting_fishery > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["commodity"],
+          message: "Livestock records use heads only (no hectares, bags, or fishery fields).",
+        });
+      }
+    }
+
+    // ── Phase 2 status enforcement.
+    //   active   → ongoing; harvest must be 0; damage allowed (mid-season)
+    //   harvested → harvest > 0 required; residual damage allowed
+    //   damaged   → damage > 0 required; harvest must be 0
+    //   archived  → read-only; UI locks fields; no business rule
+    const harvestPath = group === "FISHERY" ? "harvesting_fishery" : group === "LIVESTOCK" ? "livestock_output_heads" : "harvesting_output_bags";
+    const lossPath = group === "FISHERY" ? "fishery_loss_pieces" : group === "LIVESTOCK" ? "livestock_dead_heads" : "damage_pests_hectares";
+
+    switch (val.status) {
+      case "active":
         if (harvest > 0) {
           ctx.addIssue({
             code: "custom",
-            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
-            message: "Cannot record a harvest while status is 'Planted' — switch to 'Harvested'",
-          });
-        }
-        if (totalDamage > 0) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["damage_pests_hectares"],
-            message: "Damage logged while status is 'Planted' — switch to 'Damaged'",
-          });
-        }
-        break;
-      case "damaged":
-        if (totalDamage <= 0 && !isFishery) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["damage_pests_hectares"],
-            message: "'Damaged' status needs at least one damage value > 0",
-          });
-        }
-        if (harvest > 0) {
-          ctx.addIssue({
-            code: "custom",
-            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
-            message: "Harvest set on a 'Damaged' row — switch to 'Harvested' to finalize",
+            path: [harvestPath],
+            message: "Cannot record a harvest while status is 'Active' — switch to 'Harvested' to finalize",
           });
         }
         break;
@@ -153,26 +190,34 @@ export const recordFormSchema = z
         if (harvest <= 0) {
           ctx.addIssue({
             code: "custom",
-            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
+            path: [harvestPath],
             message: "'Harvested' status requires a harvest value > 0",
           });
         }
         break;
-      case "total_loss":
+      case "damaged":
         if (harvest > 0) {
           ctx.addIssue({
             code: "custom",
-            path: [isFishery ? "harvesting_fishery" : "harvesting_output_bags"],
-            message: "'Total loss' must have zero harvest",
+            path: [harvestPath],
+            message: "Harvest set on a 'Damaged' row — switch to 'Harvested' to finalize",
           });
         }
-        if (!isFishery && totalDamage <= 0) {
+        if (totalDamage <= 0) {
           ctx.addIssue({
             code: "custom",
-            path: ["damage_calamity_hectares"],
-            message: "'Total loss' requires damage to be logged",
+            path: [lossPath],
+            message:
+              group === "FISHERY"
+                ? "'Damaged' status needs fishery loss > 0"
+                : group === "LIVESTOCK"
+                  ? "'Damaged' status needs dead heads > 0"
+                  : "'Damaged' status needs at least one damage value > 0",
           });
         }
+        break;
+      case "archived":
+        // No business-rule enforcement here. UI locks editing; DB trigger blocks transitions out.
         break;
     }
   });

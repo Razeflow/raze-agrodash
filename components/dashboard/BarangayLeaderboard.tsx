@@ -14,6 +14,9 @@ type Row = {
   entries: number;
   farmers: number;
   production: number;
+  cropBags: number;
+  fisheryFish: number;
+  livestockHeads: number;
   area: number;
   calamityHa: number;
   commodityTypes: number;
@@ -32,6 +35,14 @@ function sortMetric(row: Row, key: SortKey): number {
     case "area":
       return row.area;
   }
+}
+
+function formatHarvestMix(row: Row): string {
+  const parts: string[] = [];
+  if (row.cropBags > 0) parts.push(`${row.cropBags.toLocaleString()} bags`);
+  if (row.fisheryFish > 0) parts.push(`${row.fisheryFish.toLocaleString()} fish`);
+  if (row.livestockHeads > 0) parts.push(`${row.livestockHeads.toLocaleString()} heads`);
+  return parts.length ? parts.join(" · ") : "0";
 }
 
 export default function BarangayLeaderboard({
@@ -59,14 +70,29 @@ export default function BarangayLeaderboard({
     const stats: Record<string, Omit<Row, "name" | "commodityTypes">> = {};
     const commoditiesByBrgy: Record<string, Set<string>> = {};
     BARANGAYS.forEach((b) => {
-      stats[b] = { entries: 0, farmers: 0, production: 0, area: 0, calamityHa: 0 };
+      stats[b] = {
+        entries: 0,
+        farmers: 0,
+        production: 0,
+        cropBags: 0,
+        fisheryFish: 0,
+        livestockHeads: 0,
+        area: 0,
+        calamityHa: 0,
+      };
       commoditiesByBrgy[b] = new Set();
     });
     dateFilteredRecords.forEach((r) => {
       if (!stats[r.barangay]) return;
       stats[r.barangay].entries++;
       stats[r.barangay].farmers += r.total_farmers;
-      stats[r.barangay].production += productionOutputForRecord(r);
+      const out = productionOutputForRecord(r);
+      stats[r.barangay].production += out;
+      if (out > 0) {
+        if (r.commodity === "Fishery") stats[r.barangay].fisheryFish += out;
+        else if (r.commodity === "Livestock") stats[r.barangay].livestockHeads += out;
+        else stats[r.barangay].cropBags += out;
+      }
       stats[r.barangay].area += r.planting_area_hectares;
       stats[r.barangay].calamityHa += r.damage_calamity_hectares;
       commoditiesByBrgy[r.barangay].add(r.commodity);
@@ -139,7 +165,7 @@ export default function BarangayLeaderboard({
   const formatSortValue = (b: Row) => {
     switch (sortBy) {
       case "production":
-        return `${b.production.toLocaleString()} bags`;
+        return formatHarvestMix(b);
       case "farmers":
         return `${b.farmers} farmers`;
       case "entries":
@@ -200,20 +226,20 @@ export default function BarangayLeaderboard({
               {insights.noRecords ? (
                 <>
                   <span className="font-bold text-slate-800">Commodities:</span> no data —{" "}
-                  <strong>0</strong> commodity types per barangay. Add records to see who leads in diversity and bags.
+                  <strong>0</strong> commodity types per barangay. Add records to see who leads in diversity and harvest output (bags · fish · heads).
                 </>
               ) : insights.allCommodityTypesZero ? (
                 <>
                   <span className="font-bold text-slate-800">Commodity coverage:</span>{" "}
-                  <strong>0</strong> distinct commodity types per barangay (all tied). Top by bags:{" "}
-                  <strong>{topProd.name}</strong> at <strong>{topProd.production.toLocaleString()} bags</strong>.
+                  <strong>0</strong> distinct commodity types per barangay (all tied). Top harvest output:{" "}
+                  <strong>{topProd.name}</strong> at <strong>{formatHarvestMix(topProd)}</strong>.
                 </>
               ) : (
                 <>
                   <span className="font-bold text-slate-800">Top commodity diversity:</span>{" "}
                   <strong>{topTypes.name}</strong> with <strong>{topTypes.commodityTypes}</strong>{" "}
-                  type{topTypes.commodityTypes !== 1 ? "s" : ""}. Top production:{" "}
-                  <strong>{topProd.name}</strong> at <strong>{topProd.production.toLocaleString()} bags</strong>
+                  type{topTypes.commodityTypes !== 1 ? "s" : ""}. Top harvest output:{" "}
+                  <strong>{topProd.name}</strong> at <strong>{formatHarvestMix(topProd)}</strong>
                   {topProd.name !== topTypes.name ? "." : " (same barangay)."}
                 </>
               )}
@@ -269,9 +295,9 @@ export default function BarangayLeaderboard({
                   <p className="font-mono text-xs font-bold text-slate-600">{b.farmers}</p>
                   <p className="text-[10px] font-bold text-slate-400">farmers</p>
                 </div>
-                <div className="text-center">
-                  <p className="font-mono text-xs font-bold text-emerald-600">{b.production.toLocaleString()}</p>
-                  <p className="text-[10px] font-bold text-slate-400">bags</p>
+                <div className="text-center max-w-[9rem]">
+                  <p className="font-mono text-[10px] font-bold leading-snug text-emerald-600">{formatHarvestMix(b)}</p>
+                  <p className="text-[10px] font-bold text-slate-400">harvest</p>
                 </div>
                 <div className="text-center">
                   <p className="font-mono text-xs font-bold text-amber-700">{b.calamityHa.toFixed(2)}</p>

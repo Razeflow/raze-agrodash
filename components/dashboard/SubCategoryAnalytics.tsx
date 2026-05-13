@@ -20,6 +20,8 @@ const tooltipStyle = {
 
 const COMMODITIES = ["Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"] as const;
 
+type SubCategoryBarRow = { name: string; output: number; mt?: number };
+
 export default function SubCategoryAnalytics({
   barangayFilter,
   dateFrom,
@@ -45,7 +47,7 @@ export default function SubCategoryAnalytics({
   const [active, setActive] = useState<string>("Rice");
   const color = COMMODITY_COLORS[active];
 
-  const subData = useMemo(() => {
+  const subData = useMemo((): SubCategoryBarRow[] => {
     const totals: Record<string, number> = {};
     records
       .filter((r) => r.commodity === active)
@@ -53,15 +55,30 @@ export default function SubCategoryAnalytics({
         totals[r.sub_category] = (totals[r.sub_category] || 0) + productionOutputForRecord(r);
       });
     return Object.entries(totals)
-      .map(([name, bags]) => ({ name, bags, tons: +(bags * 0.04).toFixed(2) }))
-      .sort((a, b) => b.bags - a.bags);
+      .map(([name, output]): SubCategoryBarRow => {
+        if (active === "Fishery" || active === "Livestock") return { name, output };
+        return { name, output, mt: +(output * 0.04).toFixed(2) };
+      })
+      .sort((a, b) => b.output - a.output);
   }, [records, active]);
+
+  const tooltipFmt = (v: number) => {
+    if (active === "Fishery") return [`${Number(v).toLocaleString()} fish`, "Harvest"];
+    if (active === "Livestock") return [`${Number(v).toLocaleString()} heads`, "Output"];
+    return [`${Number(v).toLocaleString()} bags`, "Crop harvest"];
+  };
 
   return (
     <BentoCard
       variant="compact"
       title="Sub-Category Breakdown"
-      subtitle="Production per variety / type"
+      subtitle={
+        active === "Fishery"
+          ? "Fish count per species (harvested rows)"
+          : active === "Livestock"
+            ? "Head count per type (harvested rows)"
+            : "Crop output in bags (40 kg each, harvested rows)"
+      }
       icon={Warehouse}
       className="fade-up delay-2"
     >
@@ -91,8 +108,8 @@ export default function SubCategoryAnalytics({
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontSize: 10, fill: "#94a3b8", fontFamily: "Space Mono" }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${Number(v).toLocaleString()} bags`, "Output"]} />
-              <Bar dataKey="bags" radius={[8, 8, 0, 0]} fill={color}>
+              <Tooltip contentStyle={tooltipStyle} formatter={(v) => tooltipFmt(Number(v))} />
+              <Bar dataKey="output" radius={[8, 8, 0, 0]} fill={color}>
                 {subData.map((_, i) => (
                   <Cell key={i} fill={color} opacity={1 - i * 0.1} />
                 ))}
@@ -106,14 +123,20 @@ export default function SubCategoryAnalytics({
                 <span className="text-xs font-bold text-slate-600">{d.name}</span>
                 <div className="flex items-center gap-3">
                   <div className="h-1.5 rounded-full" style={{
-                    width: `${Math.round((d.bags / subData[0].bags) * 80)}px`,
+                    width: `${Math.round((d.output / subData[0].output) * 80)}px`,
                     background: color,
                     opacity: 0.3,
                   }} />
                   <span className="w-16 text-right text-xs font-black" style={{ fontFamily: "Space Mono", color }}>
-                    {d.bags.toLocaleString()}
+                    {d.output.toLocaleString()}
                   </span>
-                  <span className="w-12 text-right text-xs font-medium text-slate-400">{d.tons} MT</span>
+                  {d.mt !== undefined ? (
+                    <span className="w-12 text-right text-xs font-medium text-slate-400">{d.mt} MT</span>
+                  ) : (
+                    <span className="w-12 text-right text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {active === "Fishery" ? "fish" : "hd"}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
