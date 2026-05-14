@@ -55,7 +55,32 @@ import {
 } from "@/lib/contexts/records-context";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 import { isHistoricalOnly } from "@/lib/domain/lifecycle";
-import { validateHouseholdCropAllocation } from "@/lib/domain/allocation";
+import {
+  validateHouseholdCropAllocation,
+  validateLandAssetAllocation,
+  type HouseholdAllocationValidation,
+  type LandAssetAllocationValidation,
+} from "@/lib/domain/allocation";
+import {
+  AGRI_RECORD_LOGGED_FIELDS,
+  FARMER_ASSET_LOGGED_FIELDS,
+  FARMER_LOGGED_FIELDS,
+  HOUSEHOLD_LOGGED_FIELDS,
+  HOUSEHOLD_SUBSIDY_LOGGED_FIELDS,
+  ORGANIZATION_LOGGED_FIELDS,
+  pickChangedFields,
+  pickFields,
+  resolveAgriRecordUpdateAction,
+  resolveFarmerUpdateAction,
+  summarizeAgriRecordChange,
+  summarizeFarmerAssetChange,
+  summarizeFarmerChange,
+  summarizeHouseholdChange,
+  summarizeHouseholdSubsidyChange,
+  summarizeOrgMembershipChange,
+  summarizeOrganizationChange,
+} from "@/lib/domain/activity";
+import { logActivity, type ActivityActor } from "@/lib/activity-log";
 import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
 import { friendlyDbError } from "./supabase/errors";
@@ -105,7 +130,7 @@ function computeFarmerFields(farmerIds: string[], allFarmers: Farmer[]) {
 }
 
 export function AgriDataProvider({ children }: { children: ReactNode }) {
-  const { isBarangayUser, userBarangay, isLoggedIn } = useAuth();
+  const { isBarangayUser, userBarangay, isLoggedIn, user } = useAuth();
   const [records, setRecords] = useState<AgriRecord[]>([]);
   const [farmers, setFarmers] = useState<Farmer[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
@@ -123,6 +148,21 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   const householdsRef = useRef<Household[]>(households);
   useEffect(() => { householdsRef.current = households; }, [households]);
+
+  const farmerAssetsRef = useRef<FarmerAsset[]>(farmerAssets);
+  useEffect(() => { farmerAssetsRef.current = farmerAssets; }, [farmerAssets]);
+
+  // Activity-log actor snapshot. Captured at mutation time so logs survive
+  // later profile edits / deletes. Pulls from useAuth() via a ref so we don't
+  // re-create mutation closures on every auth refresh.
+  const actorRef = useRef<ActivityActor>({ id: null, name: null, role: null });
+  useEffect(() => {
+    actorRef.current = {
+      id: user?.id ?? null,
+      name: user?.displayName?.trim() || user?.username || null,
+      role: user?.role ?? null,
+    };
+  }, [user]);
 
   /* ── Load from Supabase on login ──────────────────────────────── */
   useEffect(() => {
@@ -272,6 +312,22 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.from("household_subsidies").insert(s);
     if (error) return { ok: false, message: friendlyDbError(error) };
     setHouseholdSubsidies((prev) => [...prev, s]);
+    // Subsidies have no barangay column — inherit from the owning household.
+    const householdBarangay =
+      householdsRef.current.find((h) => h.id === s.household_id)?.barangay ?? "";
+    if (householdBarangay) {
+      void logActivity({
+        entityType: "household_subsidy",
+        entityId: s.id,
+        action: "subsidy_added",
+        barangay: householdBarangay,
+        before: null,
+        after: pickFields(s, HOUSEHOLD_SUBSIDY_LOGGED_FIELDS),
+        summary: summarizeHouseholdSubsidyChange("subsidy_added", null, s),
+        actor: actorRef.current,
+        metadata: { household_id: s.household_id },
+      });
+    }
     return { ok: true, subsidy: s };
   }
 
@@ -289,6 +345,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     }>,
   ): Promise<MutationResult> {
     const now = new Date().toISOString();
+    const existing = householdSubsidies.find((x) => x.id === id);
     const { error } = await supabase
       .from("household_subsidies")
       .update({ ...patch, updated_at: now })
@@ -297,13 +354,52 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     setHouseholdSubsidies((prev) =>
       prev.map((x) => (x.id === id ? { ...x, ...patch, updated_at: now } : x)),
     );
+    if (existing) {
+      const merged: HouseholdSubsidy = { ...existing, ...patch, updated_at: now } as HouseholdSubsidy;
+      const diff = pickChangedFields(existing, merged, HOUSEHOLD_SUBSIDY_LOGGED_FIELDS);
+      if (diff.before || diff.after) {
+        const householdBarangay =
+          householdsRef.current.find((h) => h.id === merged.household_id)?.barangay ?? "";
+        if (householdBarangay) {
+          void logActivity({
+            entityType: "household_subsidy",
+            entityId: id,
+            action: "subsidy_updated",
+            barangay: householdBarangay,
+            before: diff.before,
+            after: diff.after,
+            summary: summarizeHouseholdSubsidyChange("subsidy_updated", existing, merged),
+            actor: actorRef.current,
+            metadata: { household_id: merged.household_id },
+          });
+        }
+      }
+    }
     return { ok: true };
   }
 
   async function deleteHouseholdSubsidy(id: string): Promise<MutationResult> {
+    const existing = householdSubsidies.find((x) => x.id === id);
     const { error } = await supabase.from("household_subsidies").delete().eq("id", id);
     if (error) return { ok: false, message: friendlyDbError(error) };
     setHouseholdSubsidies((prev) => prev.filter((x) => x.id !== id));
+    if (existing) {
+      const householdBarangay =
+        householdsRef.current.find((h) => h.id === existing.household_id)?.barangay ?? "";
+      if (householdBarangay) {
+        void logActivity({
+          entityType: "household_subsidy",
+          entityId: id,
+          action: "subsidy_removed",
+          barangay: householdBarangay,
+          before: pickFields(existing, HOUSEHOLD_SUBSIDY_LOGGED_FIELDS),
+          after: null,
+          summary: summarizeHouseholdSubsidyChange("subsidy_removed", existing, null),
+          actor: actorRef.current,
+          metadata: { household_id: existing.household_id },
+        });
+      }
+    }
     return { ok: true };
   }
 
@@ -319,6 +415,10 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     area_hectares?: number | null;
     acquired_date?: string | null;
     notes?: string | null;
+    parcel_label?: string | null;
+    parcel_code?: string | null;
+    centroid_lat?: number | null;
+    centroid_lng?: number | null;
   }): Promise<AddFarmerAssetResult> {
     const now = new Date().toISOString();
     const a: FarmerAsset = {
@@ -332,12 +432,32 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       area_hectares: row.area_hectares ?? null,
       acquired_date: row.acquired_date || null,
       notes: row.notes ?? null,
+      parcel_label: row.parcel_label ?? null,
+      parcel_code: row.parcel_code ?? null,
+      centroid_lat: row.centroid_lat ?? null,
+      centroid_lng: row.centroid_lng ?? null,
       created_at: now,
       updated_at: now,
     };
     const { error } = await supabase.from("farmer_assets").insert(a);
     if (error) return { ok: false, message: error.message };
     setFarmerAssets((prev) => [...prev, a]);
+    // farmer_assets has no barangay column — inherit from the owning farmer.
+    const ownerBarangay =
+      farmersRef.current.find((f) => f.id === a.farmer_id)?.barangay ?? "";
+    if (ownerBarangay) {
+      void logActivity({
+        entityType: "farmer_asset",
+        entityId: a.id,
+        action: "created",
+        barangay: ownerBarangay,
+        before: null,
+        after: pickFields(a, FARMER_ASSET_LOGGED_FIELDS),
+        summary: summarizeFarmerAssetChange("created", null, a),
+        actor: actorRef.current,
+        metadata: { farmer_id: a.farmer_id },
+      });
+    }
     return { ok: true, asset: a };
   }
 
@@ -352,9 +472,14 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       area_hectares: number | null;
       acquired_date: string | null;
       notes: string | null;
+      parcel_label: string | null;
+      parcel_code: string | null;
+      centroid_lat: number | null;
+      centroid_lng: number | null;
     }>,
   ): Promise<MutationResult> {
     const now = new Date().toISOString();
+    const existing = farmerAssetsRef.current.find((x) => x.id === id);
     const { error } = await supabase
       .from("farmer_assets")
       .update({ ...patch, updated_at: now })
@@ -363,17 +488,122 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     setFarmerAssets((prev) =>
       prev.map((x) => (x.id === id ? { ...x, ...patch, updated_at: now } : x)),
     );
+    if (existing) {
+      const merged: FarmerAsset = { ...existing, ...patch, updated_at: now } as FarmerAsset;
+      const diff = pickChangedFields(existing, merged, FARMER_ASSET_LOGGED_FIELDS);
+      if (diff.before || diff.after) {
+        const ownerBarangay =
+          farmersRef.current.find((f) => f.id === merged.farmer_id)?.barangay ?? "";
+        if (ownerBarangay) {
+          void logActivity({
+            entityType: "farmer_asset",
+            entityId: id,
+            action: "updated",
+            barangay: ownerBarangay,
+            before: diff.before,
+            after: diff.after,
+            summary: summarizeFarmerAssetChange("updated", existing, merged),
+            actor: actorRef.current,
+            metadata: { farmer_id: merged.farmer_id },
+          });
+        }
+      }
+    }
     return { ok: true };
   }
 
   async function deleteFarmerAsset(id: string): Promise<MutationResult> {
+    const existing = farmerAssetsRef.current.find((x) => x.id === id);
     const { error } = await supabase.from("farmer_assets").delete().eq("id", id);
     if (error) return { ok: false, message: error.message };
     setFarmerAssets((prev) => prev.filter((x) => x.id !== id));
+    if (existing) {
+      const ownerBarangay =
+        farmersRef.current.find((f) => f.id === existing.farmer_id)?.barangay ?? "";
+      if (ownerBarangay) {
+        void logActivity({
+          entityType: "farmer_asset",
+          entityId: id,
+          action: "deleted",
+          barangay: ownerBarangay,
+          before: pickFields(existing, FARMER_ASSET_LOGGED_FIELDS),
+          after: null,
+          summary: summarizeFarmerAssetChange("deleted", existing, null),
+          actor: actorRef.current,
+          metadata: { farmer_id: existing.farmer_id },
+        });
+      }
+    }
     return { ok: true };
   }
 
   /* ── Records CRUD ─────────────────────────────────────────────── */
+
+  /**
+   * Phase 4 — log an allocation-overflow attempt. Capacity-kind rejections
+   * only; structural rejections (no household, owner mismatch, etc.) are
+   * intentionally skipped so the audit table stays focused on "users trying
+   * to overbook". Fire-and-forget; never blocks the rejected mutation.
+   *
+   * The attempted record is identified by its in-memory UUID even though no
+   * row was written — entity_id has no FK, and a real record with the same
+   * UUID can never exist (random v4). For updates the id is the existing
+   * row's id, so an investigator can correlate "attempt at 14:02 → eventual
+   * successful edit at 14:05".
+   */
+  function logHouseholdOverflowAttempt(
+    rec: AgriRecord,
+    reject: Extract<HouseholdAllocationValidation, { ok: false; kind: "capacity" }>,
+  ) {
+    void logActivity({
+      entityType: "agri_record",
+      entityId: rec.id,
+      action: "allocation_overflow_attempt",
+      barangay: rec.barangay,
+      before: null,
+      after: null,
+      summary: reject.message,
+      actor: actorRef.current,
+      metadata: {
+        pool: "household",
+        household_id: reject.householdId,
+        proposed_ha: reject.proposedHa,
+        remaining_ha: reject.remainingHa,
+        commodity: rec.commodity,
+        sub_category: rec.sub_category,
+        period_month: rec.period_month,
+        period_year: rec.period_year,
+      },
+    });
+  }
+
+  function logAssetOverflowAttempt(
+    rec: AgriRecord,
+    reject: Extract<LandAssetAllocationValidation, { ok: false; kind: "capacity" }>,
+  ) {
+    void logActivity({
+      entityType: "agri_record",
+      entityId: rec.id,
+      action: "allocation_overflow_attempt",
+      barangay: rec.barangay,
+      before: null,
+      after: null,
+      summary: reject.message,
+      actor: actorRef.current,
+      metadata: {
+        pool: "asset",
+        farmer_asset_id: reject.assetId,
+        parcel_label: reject.parcelLabel ?? null,
+        proposed_ha: reject.proposedHa,
+        remaining_ha: reject.remainingHa,
+        total_ha: reject.totalHa,
+        commodity: rec.commodity,
+        sub_category: rec.sub_category,
+        period_month: rec.period_month,
+        period_year: rec.period_year,
+      },
+    });
+  }
 
   async function addRecord(data: Omit<AgriRecord, "id" | "created_at" | "updated_at" | "total_farmers" | "farmer_names" | "farmer_male" | "farmer_female">): Promise<AddRecordResult> {
     const ff = computeFarmerFields(data.farmer_ids || [], farmersRef.current);
@@ -393,10 +623,33 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       records: recordsRef.current,
       farmers: farmersRef.current,
     });
-    if (!allocationCheck.ok) return { ok: false, message: allocationCheck.message };
+    if (!allocationCheck.ok) {
+      if (allocationCheck.kind === "capacity") logHouseholdOverflowAttempt(newRecord, allocationCheck);
+      return { ok: false, message: allocationCheck.message };
+    }
+    const landCheck = validateLandAssetAllocation({
+      record: newRecord,
+      farmerAssets: farmerAssetsRef.current,
+      records: recordsRef.current,
+    });
+    if (!landCheck.ok) {
+      if (landCheck.kind === "capacity") logAssetOverflowAttempt(newRecord, landCheck);
+      return { ok: false, message: landCheck.message };
+    }
     const { error } = await supabase.from("agri_records").insert(agriRecordInsertRow(newRecord));
     if (error) return { ok: false, message: friendlyDbError(error) };
     setRecords((prev) => [...prev, newRecord]);
+    // Phase Next: activity log — fire-and-forget, never blocks the user's write.
+    void logActivity({
+      entityType: "agri_record",
+      entityId: newRecord.id,
+      action: "created",
+      barangay: newRecord.barangay,
+      before: null,
+      after: pickFields(newRecord, AGRI_RECORD_LOGGED_FIELDS),
+      summary: summarizeAgriRecordChange("created", null, newRecord),
+      actor: actorRef.current,
+    });
     return { ok: true };
   }
 
@@ -414,23 +667,69 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       farmers: farmersRef.current,
       excludeRecordId: id,
     });
-    if (!allocationCheck.ok) return { ok: false, message: allocationCheck.message };
+    if (!allocationCheck.ok) {
+      if (allocationCheck.kind === "capacity") logHouseholdOverflowAttempt(merged, allocationCheck);
+      return { ok: false, message: allocationCheck.message };
+    }
+    const landCheck = validateLandAssetAllocation({
+      record: merged,
+      farmerAssets: farmerAssetsRef.current,
+      records: recordsRef.current,
+      excludeRecordId: id,
+    });
+    if (!landCheck.ok) {
+      if (landCheck.kind === "capacity") logAssetOverflowAttempt(merged, landCheck);
+      return { ok: false, message: landCheck.message };
+    }
     const { error } = await supabase
       .from("agri_records")
       .update(agriRecordInsertRow(merged))
       .eq("id", id);
     if (error) return { ok: false, message: friendlyDbError(error) };
     setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...payload, updated_at: now } : r)));
+    // Phase Next: activity log. Resolve the semantic action from the diff, and
+    // skip the log entirely when nothing meaningful changed (the helper
+    // short-circuits on an empty diff).
+    if (existing) {
+      const diff = pickChangedFields(existing, merged, AGRI_RECORD_LOGGED_FIELDS);
+      if (diff.before || diff.after) {
+        const action = resolveAgriRecordUpdateAction(existing, merged);
+        void logActivity({
+          entityType: "agri_record",
+          entityId: id,
+          action,
+          barangay: merged.barangay,
+          before: diff.before,
+          after: diff.after,
+          summary: summarizeAgriRecordChange(action, existing, merged),
+          actor: actorRef.current,
+        });
+      }
+    }
     return { ok: true };
   }
 
   async function deleteRecord(id: string) {
+    // Snapshot the row BEFORE the delete so we can log its identity.
+    const existing = recordsRef.current.find((r) => r.id === id);
     const { error } = await supabase.from("agri_records").delete().eq("id", id);
     if (error) {
       console.error("[AgriData] deleteRecord:", error.message);
       return;
     }
     setRecords((prev) => prev.filter((r) => r.id !== id));
+    if (existing) {
+      void logActivity({
+        entityType: "agri_record",
+        entityId: id,
+        action: "deleted",
+        barangay: existing.barangay,
+        before: pickFields(existing, AGRI_RECORD_LOGGED_FIELDS),
+        after: null,
+        summary: summarizeAgriRecordChange("deleted", existing, null),
+        actor: actorRef.current,
+      });
+    }
   }
 
   /* ── Households CRUD ──────────────────────────────────────────── */
@@ -443,6 +742,16 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.from("households").insert(row);
     if (error) return { ok: false, message: error.message };
     setHouseholds((prev) => [...prev, row]);
+    void logActivity({
+      entityType: "household",
+      entityId: row.id,
+      action: "created",
+      barangay: row.barangay,
+      before: null,
+      after: pickFields(row, HOUSEHOLD_LOGGED_FIELDS),
+      summary: summarizeHouseholdChange("created", null, row),
+      actor: actorRef.current,
+    });
     return { ok: true, row };
   }
 
@@ -453,16 +762,36 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   async function updateHousehold(id: string, h: Partial<Omit<Household, "id" | "created_at" | "updated_at">>): Promise<MutationResult> {
     const now = new Date().toISOString();
+    const existing = householdsRef.current.find((x) => x.id === id);
     const { error } = await supabase
       .from("households")
       .update({ ...h, updated_at: now })
       .eq("id", id);
     if (error) return { ok: false, message: error.message };
     setHouseholds((prev) => prev.map((x) => (x.id === id ? { ...x, ...h, updated_at: now } : x)));
+    if (existing) {
+      const merged: Household = { ...existing, ...h, updated_at: now } as Household;
+      const diff = pickChangedFields(existing, merged, HOUSEHOLD_LOGGED_FIELDS);
+      if (diff.before || diff.after) {
+        void logActivity({
+          entityType: "household",
+          entityId: id,
+          action: "updated",
+          barangay: merged.barangay,
+          before: diff.before,
+          after: diff.after,
+          summary: summarizeHouseholdChange("updated", existing, merged),
+          actor: actorRef.current,
+        });
+      }
+    }
     return { ok: true };
   }
 
   async function deleteHousehold(id: string) {
+    const existing = householdsRef.current.find((x) => x.id === id);
+    const cascadeSubsidyCount = householdSubsidies.filter((s) => s.household_id === id).length;
+    const cascadeFarmerCount = farmersRef.current.filter((f) => f.household_id === id).length;
     const { error } = await supabase.from("households").delete().eq("id", id);
     if (error) {
       console.error("[AgriData] deleteHousehold:", error.message);
@@ -472,6 +801,24 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     setHouseholds((prev) => prev.filter((x) => x.id !== id));
     setHouseholdSubsidies((prev) => prev.filter((s) => s.household_id !== id));
     setFarmers((prev) => prev.map((f) => (f.household_id === id ? { ...f, household_id: null } : f)));
+    if (existing) {
+      void logActivity({
+        entityType: "household",
+        entityId: id,
+        action: "deleted",
+        barangay: existing.barangay,
+        before: pickFields(existing, HOUSEHOLD_LOGGED_FIELDS),
+        after: null,
+        summary: summarizeHouseholdChange("deleted", existing, null),
+        actor: actorRef.current,
+        metadata: {
+          cascade: {
+            household_subsidies_removed: cascadeSubsidyCount,
+            farmers_detached: cascadeFarmerCount,
+          },
+        },
+      });
+    }
   }
 
   /* ── Organizations CRUD ───────────────────────────────────────── */
@@ -482,11 +829,26 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.from("organizations").insert(org);
     if (error) return { ok: false, message: error.message };
     setOrganizations((prev) => [...prev, org]);
+    // Org barangay is nullable (cross-barangay orgs). Activity log requires
+    // NOT NULL so use 'ALL' as a sentinel — admins see those via the role
+    // bypass; barangay users do not (consistent with org write being
+    // admin-only per migration 004).
+    void logActivity({
+      entityType: "organization",
+      entityId: org.id,
+      action: "created",
+      barangay: org.barangay ?? "ALL",
+      before: null,
+      after: pickFields(org, ORGANIZATION_LOGGED_FIELDS),
+      summary: summarizeOrganizationChange("created", null, org),
+      actor: actorRef.current,
+    });
     return { ok: true, organization: org };
   }
 
   async function updateOrganization(id: string, o: Partial<Omit<Organization, "id" | "created_at" | "updated_at">>) {
     const now = new Date().toISOString();
+    const existing = organizations.find((x) => x.id === id);
     const { error } = await supabase
       .from("organizations")
       .update({ ...o, updated_at: now })
@@ -496,21 +858,66 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       return;
     }
     setOrganizations((prev) => prev.map((x) => (x.id === id ? { ...x, ...o, updated_at: now } : x)));
+    if (existing) {
+      const merged: Organization = { ...existing, ...o, updated_at: now } as Organization;
+      const diff = pickChangedFields(existing, merged, ORGANIZATION_LOGGED_FIELDS);
+      if (diff.before || diff.after) {
+        void logActivity({
+          entityType: "organization",
+          entityId: id,
+          action: "updated",
+          barangay: merged.barangay ?? "ALL",
+          before: diff.before,
+          after: diff.after,
+          summary: summarizeOrganizationChange("updated", existing, merged),
+          actor: actorRef.current,
+        });
+      }
+    }
   }
 
   async function deleteOrganization(id: string): Promise<MutationResult> {
+    const existing = organizations.find((x) => x.id === id);
+    const cascadeMemberCount = farmerOrganizations.filter((r) => r.organization_id === id).length;
+    const cascadeHouseholdCount = householdsRef.current.filter((h) => h.organization_id === id).length;
     const { error } = await supabase.from("organizations").delete().eq("id", id);
     if (error) return { ok: false, message: error.message };
     // DB cascades farmer_organizations and nulls households.organization_id; mirror locally.
     setOrganizations((prev) => prev.filter((x) => x.id !== id));
     setFarmerOrganizations((prev) => prev.filter((r) => r.organization_id !== id));
     setHouseholds((prev) => prev.map((h) => (h.organization_id === id ? { ...h, organization_id: null } : h)));
+    if (existing) {
+      void logActivity({
+        entityType: "organization",
+        entityId: id,
+        action: "deleted",
+        barangay: existing.barangay ?? "ALL",
+        before: pickFields(existing, ORGANIZATION_LOGGED_FIELDS),
+        after: null,
+        summary: summarizeOrganizationChange("deleted", existing, null),
+        actor: actorRef.current,
+        metadata: {
+          cascade: {
+            farmer_organizations_removed: cascadeMemberCount,
+            households_detached: cascadeHouseholdCount,
+          },
+        },
+      });
+    }
     return { ok: true };
   }
 
   /* ── Farmer-Organizations ─────────────────────────────────────── */
 
   async function saveFarmerOrganizations(farmerId: string, organizationIds: string[]): Promise<MutationResult> {
+    // Snapshot the previous membership before the delete-then-insert pair so
+    // we can log a single "+N orgs / -M orgs" diff with full id arrays in
+    // metadata. The plan calls for one log per logical action, not one per
+    // join row touched.
+    const beforeIds = farmerOrganizations
+      .filter((r) => r.farmer_id === farmerId)
+      .map((r) => r.organization_id);
+
     const { error: delErr } = await supabase
       .from("farmer_organizations")
       .delete()
@@ -525,6 +932,27 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       const rest = prev.filter((r) => r.farmer_id !== farmerId);
       return [...rest, ...organizationIds.map((organization_id) => ({ farmer_id: farmerId, organization_id }))];
     });
+
+    const diff = summarizeOrgMembershipChange(beforeIds, organizationIds);
+    if (diff.added.length > 0 || diff.removed.length > 0) {
+      const ownerBarangay =
+        farmersRef.current.find((f) => f.id === farmerId)?.barangay ?? "";
+      if (ownerBarangay) {
+        void logActivity({
+          entityType: "farmer_organization",
+          // entity_id is the farmer's id — the natural pivot for "what orgs
+          // is this farmer in" queries.
+          entityId: farmerId,
+          action: "org_membership_changed",
+          barangay: ownerBarangay,
+          before: { organizations: beforeIds },
+          after: { organizations: organizationIds },
+          summary: diff.summary,
+          actor: actorRef.current,
+          metadata: { added: diff.added, removed: diff.removed },
+        });
+      }
+    }
     return { ok: true };
   }
 
@@ -590,11 +1018,22 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     if (row.household_id && row.is_household_head) {
       await demoteOtherHouseholdHeads(row.household_id, row.id);
     }
+    void logActivity({
+      entityType: "farmer",
+      entityId: row.id,
+      action: "created",
+      barangay: row.barangay,
+      before: null,
+      after: pickFields(row, FARMER_LOGGED_FIELDS),
+      summary: summarizeFarmerChange("created", null, row),
+      actor: actorRef.current,
+    });
     return { ok: true, id: row.id };
   }
 
   async function updateFarmer(id: string, data: Omit<Farmer, "id" | "created_at" | "updated_at">): Promise<MutationResult> {
     const iso = new Date().toISOString();
+    const existing = farmersRef.current.find((f) => f.id === id);
     const { error } = await supabase
       .from("farmers")
       .update({ ...data, updated_at: iso })
@@ -625,10 +1064,38 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         r.farmer_ids?.includes(id) ? { ...r, ...computeFarmerFields(r.farmer_ids, updatedFarmers) } : r,
       ),
     );
+
+    if (existing) {
+      const merged: Farmer = { ...existing, ...data, updated_at: iso };
+      const diff = pickChangedFields(existing, merged, FARMER_LOGGED_FIELDS);
+      if (diff.before || diff.after) {
+        const action = resolveFarmerUpdateAction(existing, merged);
+        void logActivity({
+          entityType: "farmer",
+          entityId: id,
+          // farmer barangay can change on edit; tag with the *new* barangay
+          // so the row is visible under the post-change scope.
+          barangay: merged.barangay,
+          action,
+          before: diff.before,
+          after: diff.after,
+          summary: summarizeFarmerChange(action, existing, merged),
+          actor: actorRef.current,
+        });
+      }
+    }
     return { ok: true };
   }
 
   async function deleteFarmer(id: string) {
+    // Snapshot BEFORE the delete so the activity log can capture identity
+    // and report what the cascade touched.
+    const existing = farmersRef.current.find((f) => f.id === id);
+    const cascadeAssetCount = farmerAssetsRef.current.filter((a) => a.farmer_id === id).length;
+    const cascadeRecordIds = recordsRef.current
+      .filter((r) => r.farmer_ids?.includes(id))
+      .map((r) => r.id);
+
     const { error } = await supabase.from("farmers").delete().eq("id", id);
     if (error) {
       console.error("[AgriData] deleteFarmer:", error.message);
@@ -661,6 +1128,27 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         return r;
       }),
     );
+
+    if (existing) {
+      // ONE log entry — cascade effects are captured in metadata, not as
+      // per-row deletes, to avoid log explosions.
+      void logActivity({
+        entityType: "farmer",
+        entityId: id,
+        action: "deleted",
+        barangay: existing.barangay,
+        before: pickFields(existing, FARMER_LOGGED_FIELDS),
+        after: null,
+        summary: summarizeFarmerChange("deleted", existing, null),
+        actor: actorRef.current,
+        metadata: {
+          cascade: {
+            agri_records_touched: cascadeRecordIds.length,
+            farmer_assets_removed: cascadeAssetCount,
+          },
+        },
+      });
+    }
   }
 
   const getFarmersByIds = useCallback((ids: string[]) => farmers.filter((f) => ids.includes(f.id)), [farmers]);

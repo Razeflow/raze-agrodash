@@ -29,6 +29,7 @@ type Draft = {
   area_hectares: string;
   acquired_date: string;
   notes: string;
+  parcel_label: string;
 };
 
 const emptyNew = (): Draft => ({
@@ -40,6 +41,7 @@ const emptyNew = (): Draft => ({
   area_hectares: "",
   acquired_date: "",
   notes: "",
+  parcel_label: "",
 });
 
 function assetToDraft(a: FarmerAsset): Draft {
@@ -52,7 +54,16 @@ function assetToDraft(a: FarmerAsset): Draft {
     area_hectares: a.area_hectares != null ? String(a.area_hectares) : "",
     acquired_date: a.acquired_date ?? "",
     notes: a.notes ?? "",
+    parcel_label: a.parcel_label ?? "",
   };
+}
+
+function validatePlantingAreaDraft(d: Draft): string | null {
+  if (d.category !== "planting_area") return null;
+  if (!d.parcel_label.trim()) return "Parcel label is required for planting-area assets (e.g. \"Farm Lot A\").";
+  const ha = parseFloat(d.area_hectares);
+  if (!Number.isFinite(ha) || ha <= 0) return "Area (hectares) must be greater than 0 for planting-area assets.";
+  return null;
 }
 
 function parseNum(s: string): number | null {
@@ -98,6 +109,11 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
       setErrorMsg("Please choose a sub-category.");
       return;
     }
+    const plantingAreaErr = validatePlantingAreaDraft(newItem);
+    if (plantingAreaErr) {
+      setErrorMsg(plantingAreaErr);
+      return;
+    }
     const res = await addFarmerAsset({
       farmer_id: f.id,
       category: newItem.category,
@@ -108,6 +124,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
       area_hectares: parseNum(newItem.area_hectares),
       acquired_date: newItem.acquired_date.trim() || null,
       notes: newItem.notes.trim() || null,
+      parcel_label: newItem.category === "planting_area" ? newItem.parcel_label.trim() : null,
     });
     if (!res.ok) {
       setErrorMsg(res.message);
@@ -128,6 +145,11 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
       setErrorMsg("Please choose a sub-category.");
       return;
     }
+    const plantingAreaErr = validatePlantingAreaDraft(editDraft);
+    if (plantingAreaErr) {
+      setErrorMsg(plantingAreaErr);
+      return;
+    }
     const res = await updateFarmerAsset(editingId, {
       category: editDraft.category,
       sub_category: sub || null,
@@ -137,6 +159,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
       area_hectares: parseNum(editDraft.area_hectares),
       acquired_date: editDraft.acquired_date.trim() || null,
       notes: editDraft.notes.trim() || null,
+      parcel_label: editDraft.category === "planting_area" ? editDraft.parcel_label.trim() : null,
     });
     if (!res.ok) {
       setErrorMsg(res.message);
@@ -159,6 +182,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
   const assetFields = (d: Draft, set: (u: Draft) => void) => {
     const subOptions = getAssetSubCategoryOptions(d.category);
     const showArea = d.category === "planting_area" || d.category === "fishpond";
+    const isPlantingArea = d.category === "planting_area";
     return (
       <div className="grid gap-2 sm:grid-cols-2">
         <div className={subOptions.length > 0 ? "" : "sm:col-span-2"}>
@@ -178,6 +202,17 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
             ))}
           </select>
         </div>
+        {isPlantingArea && (
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Parcel label <span className="text-red-500">*</span></label>
+            <input
+              className={inputCls}
+              value={d.parcel_label}
+              onChange={(e) => set({ ...d, parcel_label: e.target.value })}
+              placeholder='e.g. "Farm Lot A" — used to allocate crop records to this lot'
+            />
+          </div>
+        )}
         {subOptions.length > 0 && (
           <div>
             <label className={labelCls}>Sub-category</label>
@@ -226,7 +261,9 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
         </div>
         {showArea && (
           <div>
-            <label className={labelCls}>Area (hectares)</label>
+            <label className={labelCls}>
+              Area (hectares){isPlantingArea && <span className="text-red-500"> *</span>}
+            </label>
             <input
               className={inputCls}
               type="number"

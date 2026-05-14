@@ -7,12 +7,16 @@
  */
 
 import {
+  isActivityAction,
+  isActivityEntityType,
   isFarmerAssetCategory,
   isLifecycleStatus,
   isSubsidyCategory,
   normalizeCalamitySubCategory,
   normalizeCommodity,
   numField,
+  type ActivityLog,
+  type ActivitySource,
   type AgriRecord,
   type Farmer,
   type FarmerAsset,
@@ -56,6 +60,11 @@ export function normalizeFarmerAsset(row: Record<string, unknown>): FarmerAsset 
     area_hectares: row.area_hectares != null && row.area_hectares !== "" ? Number(row.area_hectares) : null,
     acquired_date: row.acquired_date != null ? String(row.acquired_date).slice(0, 10) : null,
     notes: row.notes != null ? String(row.notes) : null,
+    parcel_label: row.parcel_label != null ? String(row.parcel_label) : null,
+    parcel_code: row.parcel_code != null ? String(row.parcel_code) : null,
+    geom_geojson: row.geom_geojson ?? null,
+    centroid_lat: row.centroid_lat != null && row.centroid_lat !== "" ? Number(row.centroid_lat) : null,
+    centroid_lng: row.centroid_lng != null && row.centroid_lng !== "" ? Number(row.centroid_lng) : null,
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
   };
@@ -154,5 +163,63 @@ export function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
     base.livestock_dead_heads = numField(row.livestock_dead_heads);
   }
 
+  // Phase A: optional FK to a LAND asset (migration 017).
+  base.farmer_asset_id =
+    typeof row.farmer_asset_id === "string" && row.farmer_asset_id.length > 0
+      ? row.farmer_asset_id
+      : null;
+
   return base;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Phase Next — Activity Timeline (migration 019)
+ * ────────────────────────────────────────────────────────────────────── */
+
+function parseJsonbObject(raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null;
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === "string" && raw.length > 0) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
+}
+
+function parseActivitySource(raw: unknown): ActivitySource {
+  return raw === "db_trigger" ? "db_trigger" : "app";
+}
+
+export function normalizeActivityLog(row: Record<string, unknown>): ActivityLog {
+  const entityTypeRaw = String(row.entity_type ?? "");
+  const actionRaw = String(row.action ?? "");
+  return {
+    id: String(row.id),
+    entity_type: isActivityEntityType(entityTypeRaw) ? entityTypeRaw : "agri_record",
+    entity_id: String(row.entity_id ?? ""),
+    action: isActivityAction(actionRaw) ? actionRaw : "updated",
+    before: parseJsonbObject(row.before),
+    after: parseJsonbObject(row.after),
+    summary: row.summary != null ? String(row.summary) : null,
+    performed_by:
+      typeof row.performed_by === "string" && row.performed_by.length > 0
+        ? row.performed_by
+        : null,
+    performed_by_name:
+      row.performed_by_name != null ? String(row.performed_by_name) : null,
+    performed_by_role:
+      row.performed_by_role != null ? String(row.performed_by_role) : null,
+    barangay: String(row.barangay ?? ""),
+    source: parseActivitySource(row.source),
+    metadata: parseJsonbObject(row.metadata),
+    created_at: String(row.created_at ?? ""),
+  };
 }

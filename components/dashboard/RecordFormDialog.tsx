@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { X, Users, CheckCircle2, AlertCircle } from "lucide-react";
+import { X, Users, CheckCircle2, AlertCircle, History, FileText } from "lucide-react";
 import type { AgriRecord } from "@/lib/data";
 import {
   BARANGAYS,
@@ -24,6 +24,7 @@ import { recordFormSchema, RECORD_LIMITS, zodIssuesToErrors, type RecordFormInpu
 import { sortBy } from "@/lib/sort";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 import { recordStatus } from "@/lib/domain/metrics";
+import { calculateRemainingLandAssetHa } from "@/lib/domain/allocation";
 import {
   RECORD_STATUSES,
   RECORD_STATUS_LABELS,
@@ -36,6 +37,7 @@ import CropFields from "./record-form/CropFields";
 import FisheryFields from "./record-form/FisheryFields";
 import LivestockFields from "./record-form/LivestockFields";
 import { FieldError, FieldLabel, inputCls, inputErrCls } from "./record-form/Field";
+import RecordTimeline from "./RecordTimeline";
 
 type Props = {
   open: boolean;
@@ -64,6 +66,7 @@ type FormErrors = {
   remarks?: string;
   lifecycle_status?: string;
   status?: string;
+  farmer_asset_id?: string;
 };
 
 function getEmptyForm() {
@@ -91,6 +94,7 @@ function getEmptyForm() {
     remarks: "",
     lifecycle_status: "planted" as LifecycleStatus,
     status: "active" as RecordStatus,
+    farmer_asset_id: null,
   };
   return out;
 }
@@ -119,7 +123,7 @@ function deriveLifecycleFromStatus(
 }
 
 export default function RecordFormDialog({ open, onClose, mode, initialData, defaultBarangay }: Props) {
-  const { addRecord, updateRecord, getFarmersByIds } = useAgriData();
+  const { addRecord, updateRecord, getFarmersByIds, farmerAssets, records } = useAgriData();
   const { isBarangayUser, userBarangay } = useAuth();
   const { mounted, visible } = useAnimatedMount(open);
   const availableBarangays = useMemo(() => {
@@ -133,6 +137,8 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Phase Next: which tab is active. Only "timeline" is reachable in edit mode.
+  const [activeTab, setActiveTab] = useState<"details" | "timeline">("details");
 
   useEffect(() => {
     if (open) {
@@ -140,6 +146,8 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       setErrorMsg(null);
       setErrors({});
       setSubmitted(false);
+      // Always land on Details when the dialog (re)opens.
+      setActiveTab("details");
       if (mode === "edit" && initialData) {
         setForm({
           barangay: initialData.barangay,
@@ -164,6 +172,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           remarks: initialData.remarks,
           lifecycle_status: initialData.lifecycle_status ?? "planted",
           status: recordStatus(initialData as any),
+          farmer_asset_id: initialData.farmer_asset_id ?? null,
         });
       } else {
         const empty = getEmptyForm();
@@ -180,11 +189,53 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     return "active";
   }, [mode, initialData]);
 
+  // ── Phase C: LAND asset selector (CROP-only, optional) ──────────────────
+  // All hooks below must run on every render — keep them above the early
+  // `if (!mounted) return null` guard further down.
+  const groupForHooks = commodityGroupForCommodity(form.commodity as any);
+  const eligibleLandAssets = useMemo(() => {
+    if (groupForHooks !== "CROP") return [];
+    if (form.farmer_ids.length === 0) return [];
+    const farmerIdSet = new Set(form.farmer_ids);
+    return farmerAssets
+      .filter((a) => a.category === "planting_area")
+      .filter((a) => farmerIdSet.has(a.farmer_id))
+      .filter((a) => (a.area_hectares ?? 0) > 0)
+      .sort((a, b) => (a.parcel_label || "").localeCompare(b.parcel_label || ""));
+  }, [farmerAssets, form.farmer_ids, groupForHooks]);
+
+  const selectedAsset = useMemo(
+    () => (form.farmer_asset_id ? farmerAssets.find((a) => a.id === form.farmer_asset_id) ?? null : null),
+    [farmerAssets, form.farmer_asset_id],
+  );
+
+  // Remaining ha on the currently selected asset, excluding *this* record's
+  // own contribution when editing — otherwise edit-time validation would
+  // double-count its own area against itself.
+  const remainingOnSelectedAsset = useMemo(() => {
+    if (!selectedAsset) return null;
+    return calculateRemainingLandAssetHa(selectedAsset, records, {
+      excludeRecordId: mode === "edit" ? initialData?.id : undefined,
+    });
+  }, [selectedAsset, records, mode, initialData?.id]);
+
+  // Cascade-clear: drop farmer_asset_id when the selection becomes invalid
+  // (commodity left CROP, or asset's owner is no longer among the farmers).
+  useEffect(() => {
+    if (!form.farmer_asset_id) return;
+    if (groupForHooks !== "CROP") {
+      setForm((f) => ({ ...f, farmer_asset_id: null }));
+      return;
+    }
+    const stillEligible = eligibleLandAssets.some((a) => a.id === form.farmer_asset_id);
+    if (!stillEligible) setForm((f) => ({ ...f, farmer_asset_id: null }));
+  }, [form.farmer_asset_id, eligibleLandAssets, groupForHooks]);
+
   if (!mounted) return null;
 
   const isFishery = form.commodity === "Fishery";
   const isLivestock = form.commodity === "Livestock";
-  const group = commodityGroupForCommodity(form.commodity as any);
+  const group = groupForHooks;
   const isCorn = form.commodity === "Corn";
   const subTypes = SUB_TYPES[form.commodity] || [];
   const linkedFarmers = getFarmersByIds(form.farmer_ids);
@@ -200,13 +251,30 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
   function validate(): FormErrors {
     const result = recordFormSchema.safeParse(form);
-    if (result.success) return {};
-    const fieldErrors = zodIssuesToErrors(result.error.issues);
-    // Collapse period_month / period_year errors under the shared `period` key
-    // so the existing single-row "Reporting period is required" UI still works.
-    const errs: FormErrors = { ...(fieldErrors as FormErrors) };
-    if (fieldErrors.period_month || fieldErrors.period_year) {
-      errs.period = fieldErrors.period_month || fieldErrors.period_year;
+    const errs: FormErrors = result.success
+      ? {}
+      : (() => {
+          const fieldErrors = zodIssuesToErrors(result.error.issues);
+          const e: FormErrors = { ...(fieldErrors as FormErrors) };
+          // Collapse period_month / period_year errors under the shared `period` key
+          // so the existing single-row "Reporting period is required" UI still works.
+          if (fieldErrors.period_month || fieldErrors.period_year) {
+            e.period = fieldErrors.period_month || fieldErrors.period_year;
+          }
+          return e;
+        })();
+
+    // Phase D: require farmer_asset_id for NEW CROP records when the farmer
+    // already has at least one eligible planting-area asset on file. Edits of
+    // existing records are not gated, so legacy rows stay editable.
+    if (
+      mode === "add" &&
+      group === "CROP" &&
+      form.farmer_ids.length > 0 &&
+      eligibleLandAssets.length > 0 &&
+      !form.farmer_asset_id
+    ) {
+      errs.farmer_asset_id = "Pick the land asset this crop cycle is planted on.";
     }
     return errs;
   }
@@ -318,6 +386,51 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             </div>
           </div>
 
+          {/* Phase Next: Details / Timeline tab strip. Only shown in edit mode
+              because there is no record yet in add mode (nothing to show a
+              timeline for). The Timeline panel is lazy-loaded — it only
+              fetches when its tab becomes active. */}
+          {mode === "edit" && initialData && (
+            <div className="mb-5 inline-flex rounded-full bg-slate-100/70 p-1 text-xs font-medium" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "details"}
+                onClick={() => setActiveTab("details")}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition ${
+                  activeTab === "details"
+                    ? "bg-white text-slate-800 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <FileText size={12} /> Details
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "timeline"}
+                onClick={() => setActiveTab("timeline")}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition ${
+                  activeTab === "timeline"
+                    ? "bg-white text-slate-800 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <History size={12} /> Timeline
+              </button>
+            </div>
+          )}
+
+          {/* Timeline tab content. Mounted only when active so the fetch fires
+              on tab open, not on dialog open. */}
+          {mode === "edit" && initialData && activeTab === "timeline" && (
+            <RecordTimeline recordId={initialData.id} active={true} />
+          )}
+
+          {/* Everything below this point is the Details tab — banners + form.
+              Wrapped in a fragment so the activeTab gate covers all of it. */}
+          {activeTab === "details" && (
+          <>
           {successMsg && (
             <div className="mb-4 rounded-2xl bg-emerald-50/70 border border-emerald-200/50 px-4 py-2.5 text-sm font-medium text-green-700 flex items-center gap-2 animate-in">
               <CheckCircle2 size={16} /> {successMsg}
@@ -494,6 +607,57 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
               )}
             </div>
 
+            {/* Phase C/D: Land asset selector — CROP only, requires farmers picked. */}
+            {/* Required for NEW crop records when an eligible asset exists (Phase D). */}
+            {group === "CROP" && form.farmer_ids.length > 0 && (
+              <div>
+                <FieldLabel required={mode === "add" && eligibleLandAssets.length > 0}>
+                  Land asset{mode === "edit" ? " (optional)" : eligibleLandAssets.length === 0 ? " (optional — none on file)" : ""}
+                </FieldLabel>
+                <select
+                  className={errors.farmer_asset_id ? inputErrCls : inputCls}
+                  disabled={archived || eligibleLandAssets.length === 0}
+                  value={form.farmer_asset_id ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setForm((f) => ({ ...f, farmer_asset_id: v ? v : null }));
+                    if (submitted) setErrors((er) => ({ ...er, farmer_asset_id: undefined }));
+                  }}
+                >
+                  <option value="">— Household allocation (no specific lot) —</option>
+                  {eligibleLandAssets.map((a) => {
+                    const label = a.parcel_label?.trim() || `Lot ${a.id.slice(0, 8)}`;
+                    return (
+                      <option key={a.id} value={a.id}>
+                        {label} — {Number(a.area_hectares).toFixed(2)} ha total
+                      </option>
+                    );
+                  })}
+                </select>
+                {errors.farmer_asset_id && (
+                  <p className={errTextCls}><AlertCircle size={11} /> {errors.farmer_asset_id}</p>
+                )}
+                {eligibleLandAssets.length === 0 ? (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    No planting-area assets on file for the selected farmer(s). Add one in Farmer Assets to track per-lot allocation.
+                  </p>
+                ) : selectedAsset && remainingOnSelectedAsset != null ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Remaining on this lot:{" "}
+                    <span className={remainingOnSelectedAsset < (form.planting_area_hectares ?? 0) ? "font-bold text-red-600" : "font-bold text-emerald-700"}>
+                      {remainingOnSelectedAsset.toFixed(2)} ha
+                    </span>{" "}
+                    of {Number(selectedAsset.area_hectares).toFixed(2)} ha total
+                    {mode === "edit" ? " (this record's current allocation excluded)" : ""}.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Pick the lot this cycle is planted on.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Crop fields (hidden for Fishery + Livestock) */}
             {!isFishery && !isLivestock && (
               <CropFields
@@ -602,6 +766,8 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
               ) : null}
             </div>
           </form>
+          </>
+          )}
         </div>
         </div>
       </div>

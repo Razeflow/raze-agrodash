@@ -17,11 +17,14 @@ import ExportButton from "@/components/dashboard/ExportButton";
 import PasswordChangeDialog from "@/components/dashboard/PasswordChangeDialog";
 import UserManagement from "@/components/dashboard/UserManagement";
 import ProgramsView from "@/components/dashboard/ProgramsView";
+import LandAllocation from "@/components/dashboard/LandAllocation";
+import UserActivityPanel from "@/components/dashboard/UserActivityPanel";
 import { BARANGAYS } from "@/lib/data";
 import { sortBy } from "@/lib/sort";
 import {
   Sprout, BarChart2, AlertTriangle, Users, Table2, Menu, X, ClipboardList,
-  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins, Calendar, Printer,
+  LogOut, Key, UserCog, MapPin, TrendingUp, HandCoins, Calendar, Printer, Layers,
+  History,
 } from "lucide-react";
 
 const TAB_DESCRIPTIONS: Record<string, string> = {
@@ -29,7 +32,9 @@ const TAB_DESCRIPTIONS: Record<string, string> = {
   damage: "Weather alerts & loss data",
   farmers: "Municipal database",
   records: "Production logs",
+  land: "Per-lot utilization",
   programs: "RFFA, subsidies & organizations",
+  activity: "Audit trail & investigation",
   manage: "Barangay user credentials",
   users: "Admin roles",
 };
@@ -48,7 +53,9 @@ const ALL_TABS = [
   { id: "damage",    label: "Damage & Risk", icon: AlertTriangle,  adminOnly: false, superAdminOnly: false },
   { id: "farmers",   label: "Farmers",       icon: Users,          adminOnly: false, superAdminOnly: false },
   { id: "records",   label: "Records",       icon: Table2,         adminOnly: false, superAdminOnly: false },
+  { id: "land",      label: "Land",          icon: Layers,         adminOnly: false, superAdminOnly: false },
   { id: "programs",  label: "Programs",      icon: HandCoins,      adminOnly: false, superAdminOnly: false },
+  { id: "activity",  label: "Activity",      icon: History,        adminOnly: true,  superAdminOnly: false },
   { id: "manage",    label: "Management",    icon: ClipboardList,  adminOnly: true,  superAdminOnly: false },
   { id: "users",     label: "Users",         icon: UserCog,        adminOnly: true,  superAdminOnly: false },
 ];
@@ -387,7 +394,9 @@ export default function Page() {
             {tab === "damage" && <DamageRiskMonitoring />}
             {tab === "farmers" && <FarmerDistribution />}
             {tab === "records" && <DataTable />}
+            {tab === "land" && <LandAllocation />}
             {tab === "programs" && <ProgramsView />}
+            {tab === "activity" && isAdminOrAbove && <UserActivityPanel />}
             {tab === "manage" && isAdminOrAbove && <ManagementView />}
             {tab === "users" && isAdminOrAbove && <UserManagement />}
           </div>

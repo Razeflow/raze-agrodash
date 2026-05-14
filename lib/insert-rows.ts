@@ -4,7 +4,7 @@
  * state transitions rather than serialization details.
  */
 
-import type { AgriRecord, Farmer } from "@/lib/data";
+import type { ActivityLog, AgriRecord, Farmer } from "@/lib/data";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 
 /** Columns on public.farmers (matches scripts/seed-supabase-bulk.ts). */
@@ -56,7 +56,27 @@ export function agriRecordInsertRow(r: AgriRecord) {
     lifecycle_status: r.lifecycle_status,
     status: r.status ?? null,
     commodity_group: r.commodity_group ?? commodityGroupForCommodity(r.commodity),
+    farmer_asset_id: r.farmer_asset_id ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
+  };
+}
+
+/** Columns on public.activity_logs (Phase Next, migration 019). */
+export function activityLogInsertRow(log: Omit<ActivityLog, "created_at">) {
+  return {
+    id: log.id,
+    entity_type: log.entity_type,
+    entity_id: log.entity_id,
+    action: log.action,
+    before: log.before,
+    after: log.after,
+    summary: log.summary,
+    performed_by: log.performed_by,
+    performed_by_name: log.performed_by_name,
+    performed_by_role: log.performed_by_role,
+    barangay: log.barangay,
+    source: log.source,
+    metadata: log.metadata,
   };
 }

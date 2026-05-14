@@ -1,4 +1,4 @@
-import type { AgriRecord, Farmer, Household } from "@/lib/data";
+import type { AgriRecord, Farmer, FarmerAsset, Household } from "@/lib/data";
 import { numField } from "@/lib/data";
 import { commodityGroupForCommodity } from "./commodity";
 import { recordStatus, type RecordLike } from "./metrics";
@@ -131,9 +131,27 @@ export function findConflictingActiveCropCycle(input: {
   });
 }
 
+/**
+ * Discriminator on validator failures:
+ *   - 'capacity'  → the user tried to allocate more than the pool has left.
+ *                   `proposedHa` / `remainingHa` are populated. Phase 4 logs
+ *                   these as `allocation_overflow_attempt` activity rows.
+ *   - 'structure' → a non-overflow reject (missing household, owner
+ *                   mismatch, duplicate cycle, etc.). Not logged.
+ */
+export type AllocationRejectKind = "capacity" | "structure";
+
 export type HouseholdAllocationValidation =
   | { ok: true }
-  | { ok: false; message: string };
+  | { ok: false; message: string; kind: "structure" }
+  | {
+      ok: false;
+      message: string;
+      kind: "capacity";
+      proposedHa: number;
+      remainingHa: number;
+      householdId: string;
+    };
 
 /**
  * Validates household planting capacity and duplicate active-cycle rules for crop rows.
@@ -150,11 +168,15 @@ export function validateHouseholdCropAllocation(input: {
   if (commodityGroupForCommodity(r.commodity) !== "CROP") return { ok: true };
 
   const hhRes = resolveHouseholdFromFarmers(r.farmer_ids || [], input.farmers);
-  if (!hhRes.ok) return hhRes;
+  if (!hhRes.ok) return { ok: false, message: hhRes.message, kind: "structure" };
 
   const household = input.households.find((h) => h.id === hhRes.householdId);
   if (!household) {
-    return { ok: false, message: "Household not found for selected farmers—refresh and try again." };
+    return {
+      ok: false,
+      message: "Household not found for selected farmers—refresh and try again.",
+      kind: "structure",
+    };
   }
 
   const st = recordStatus(r);
@@ -168,7 +190,16 @@ export function validateHouseholdCropAllocation(input: {
       proposedActiveHa: proposedHa,
       excludeRecordId: input.excludeRecordId,
     });
-    if (!capAlloc.ok) return { ok: false, message: capAlloc.message };
+    if (!capAlloc.ok) {
+      return {
+        ok: false,
+        message: capAlloc.message,
+        kind: "capacity",
+        proposedHa,
+        remainingHa: capAlloc.remainingBefore,
+        householdId: household.id,
+      };
+    }
 
     const conflict = findConflictingActiveCropCycle({
       farmerIds: r.farmer_ids || [],
@@ -184,8 +215,156 @@ export function validateHouseholdCropAllocation(input: {
         ok: false,
         message:
           "An active crop cycle already exists for one of these farmers in this reporting period with the same commodity and variety. Finalize or archive it before starting another.",
+        kind: "structure",
       };
     }
+  }
+
+  return { ok: true };
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Phase B — Asset-level (LAND) allocation
+ *
+ * Runs in parallel with the household path. A record opts in by setting
+ * `farmer_asset_id`; when null, only the household path applies. When set,
+ * both run — the asset path is narrower and catches the same overdraw that
+ * the household path would, plus owner-mismatch and category errors.
+ *
+ * Mirrors the SQL trigger and view from migrations/017_land_allocation.sql:
+ *   - asset must be category='planting_area'
+ *   - asset's farmer_id must appear in record.farmer_ids
+ *   - active CROP records consume planting_area_hectares against asset.area_hectares
+ *   - harvested / damaged / archived records release allocation
+ * ────────────────────────────────────────────────────────────────────── */
+
+export type LandAssetAllocationValidation =
+  | { ok: true }
+  | {
+      ok: false;
+      message: string;
+      kind: "structure";
+      assetId?: string;
+      parcelLabel?: string;
+    }
+  | {
+      ok: false;
+      message: string;
+      kind: "capacity";
+      proposedHa: number;
+      remainingHa: number;
+      totalHa: number;
+      assetId: string;
+      parcelLabel?: string;
+    };
+
+/**
+ * Sum of active CROP `planting_area_hectares` for records pointing at a given asset.
+ * Used by both `validateLandAssetAllocation` and the live-remaining hint in the form.
+ */
+export function sumActiveLandAssetAllocationHa(
+  assetId: string,
+  records: RecordLike[],
+  opts?: { excludeRecordId?: string },
+): number {
+  let sum = 0;
+  for (const r of records) {
+    if (opts?.excludeRecordId && r.id === opts.excludeRecordId) continue;
+    if (r.farmer_asset_id !== assetId) continue;
+    if (commodityGroupForCommodity(r.commodity) !== "CROP") continue;
+    if (recordStatus(r) !== "active") continue;
+    sum += Math.max(0, numField(r.planting_area_hectares));
+  }
+  return sum;
+}
+
+/** Remaining capacity on a LAND asset, after subtracting active CROP records. */
+export function calculateRemainingLandAssetHa(
+  asset: FarmerAsset,
+  records: RecordLike[],
+  opts?: { excludeRecordId?: string },
+): number {
+  const total = Math.max(0, numField(asset.area_hectares));
+  const used = sumActiveLandAssetAllocationHa(asset.id, records, opts);
+  return Math.max(0, +(total - used).toFixed(6));
+}
+
+/**
+ * Validates the asset linkage and asset-level capacity. No-op when the record
+ * has no `farmer_asset_id`. Safe to call alongside `validateHouseholdCropAllocation`.
+ */
+export function validateLandAssetAllocation(input: {
+  record: RecordLike;
+  farmerAssets: FarmerAsset[];
+  records: RecordLike[];
+  excludeRecordId?: string;
+}): LandAssetAllocationValidation {
+  const r = input.record;
+  const assetId = r.farmer_asset_id;
+  if (!assetId) return { ok: true };
+
+  const asset = input.farmerAssets.find((a) => a.id === assetId);
+  if (!asset) {
+    return {
+      ok: false,
+      message: "Selected land asset was not found — refresh and try again.",
+      kind: "structure",
+      assetId,
+    };
+  }
+  if (asset.category !== "planting_area") {
+    return {
+      ok: false,
+      message: "Only LAND (planting area) assets can be selected as an allocation source.",
+      kind: "structure",
+      assetId,
+    };
+  }
+  if (!r.farmer_ids?.includes(asset.farmer_id)) {
+    return {
+      ok: false,
+      message: "The owner of the selected land must be listed among the farmers on this record.",
+      kind: "structure",
+      assetId,
+    };
+  }
+
+  // Asset-level capacity only matters for active CROP records.
+  if (commodityGroupForCommodity(r.commodity) !== "CROP") return { ok: true };
+  if (recordStatus(r) !== "active") return { ok: true };
+
+  const total = Math.max(0, numField(asset.area_hectares));
+  if (total <= 0) {
+    return {
+      ok: false,
+      message: "Selected land asset has no area set — open Farmer Assets and enter its hectares first.",
+      kind: "structure",
+      assetId,
+      parcelLabel: asset.parcel_label ?? undefined,
+    };
+  }
+
+  const proposed = Math.max(0, numField(r.planting_area_hectares));
+  const usedByOthers = sumActiveLandAssetAllocationHa(assetId, input.records, {
+    excludeRecordId: input.excludeRecordId,
+  });
+  const remaining = +(total - usedByOthers).toFixed(6);
+
+  if (proposed > remaining + FP_EPS) {
+    const label = asset.parcel_label?.trim() || `the selected land`;
+    return {
+      ok: false,
+      message:
+        `Active planted area (${proposed.toFixed(2)} ha) exceeds remaining capacity on ${label} ` +
+        `(${remaining.toFixed(2)} ha of ${total.toFixed(2)} ha total). Reduce area, pick another asset, ` +
+        `or finalize a competing active cycle on this land.`,
+      kind: "capacity",
+      proposedHa: proposed,
+      remainingHa: remaining,
+      totalHa: total,
+      assetId,
+      parcelLabel: asset.parcel_label ?? undefined,
+    };
   }
 
   return { ok: true };

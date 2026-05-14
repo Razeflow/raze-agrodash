@@ -59,6 +59,10 @@ export type FarmersContextValue = {
     area_hectares?: number | null;
     acquired_date?: string | null;
     notes?: string | null;
+    parcel_label?: string | null;
+    parcel_code?: string | null;
+    centroid_lat?: number | null;
+    centroid_lng?: number | null;
   }) => Promise<AddFarmerAssetResult>;
   updateFarmerAsset: (
     id: string,
@@ -71,6 +75,10 @@ export type FarmersContextValue = {
       area_hectares: number | null;
       acquired_date: string | null;
       notes: string | null;
+      parcel_label: string | null;
+      parcel_code: string | null;
+      centroid_lat: number | null;
+      centroid_lng: number | null;
     }>,
   ) => Promise<MutationResult>;
   deleteFarmerAsset: (id: string) => Promise<MutationResult>;

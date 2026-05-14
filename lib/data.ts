@@ -113,6 +113,11 @@ export type AgriRecord = {
   /** Phase 2 lifecycle column (when present). */
   status?: PhaseRecordStatus | null;
   commodity_group?: AgriCommodityGroup | null;
+  /**
+   * Phase A (migration 017): optional FK to a LAND (planting_area) farmer_assets row.
+   * When set, asset-level allocation rules apply; when null, household-level rules apply.
+   */
+  farmer_asset_id?: string | null;
   created_at: string;          // ISO timestamp
   updated_at: string;          // ISO timestamp
 };
@@ -318,6 +323,15 @@ export type FarmerAsset = {
   area_hectares: number | null;
   acquired_date: string | null;
   notes: string | null;
+  /** Phase A (migration 017 §3): human-readable label for a LAND parcel, e.g. "Farm Lot A". */
+  parcel_label?: string | null;
+  /** Optional external identifier (cadastral / RSBSA / etc.). */
+  parcel_code?: string | null;
+  /** Parcel geometry as GeoJSON. Reserved for later PostGIS migration. */
+  geom_geojson?: unknown | null;
+  /** Denormalised centroid (WGS84) for quick map rendering. */
+  centroid_lat?: number | null;
+  centroid_lng?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -389,6 +403,96 @@ export type Farmer = {
   created_at: string;
   updated_at: string;
 };
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Phase Next — Activity Timeline / Operational History
+ *
+ * Append-only log of who did what, when. Written app-side from
+ * lib/activity-log.ts after every successful Supabase mutation.
+ * Mirrors migrations/019_activity_logs.sql. Keep this enum and the SQL
+ * CHECK constraints in sync.
+ * ────────────────────────────────────────────────────────────────────── */
+
+export type ActivityEntityType =
+  | "agri_record"
+  | "farmer"
+  | "household"
+  | "farmer_asset"
+  | "organization"
+  | "household_subsidy"
+  | "farmer_organization";
+
+export const ACTIVITY_ENTITY_TYPES: ActivityEntityType[] = [
+  "agri_record",
+  "farmer",
+  "household",
+  "farmer_asset",
+  "organization",
+  "household_subsidy",
+  "farmer_organization",
+];
+
+export type ActivityAction =
+  | "created"
+  | "updated"
+  | "deleted"
+  | "status_changed"
+  | "archived"
+  | "land_allocation_changed"
+  | "damage_updated"
+  | "household_transferred"
+  | "allocation_overflow_attempt"
+  | "subsidy_added"
+  | "subsidy_updated"
+  | "subsidy_removed"
+  | "org_membership_changed";
+
+export const ACTIVITY_ACTIONS: ActivityAction[] = [
+  "created",
+  "updated",
+  "deleted",
+  "status_changed",
+  "archived",
+  "land_allocation_changed",
+  "damage_updated",
+  "household_transferred",
+  "allocation_overflow_attempt",
+  "subsidy_added",
+  "subsidy_updated",
+  "subsidy_removed",
+  "org_membership_changed",
+];
+
+/** Source of the log entry. 'db_trigger' is reserved for a later phase. */
+export type ActivitySource = "app" | "db_trigger";
+
+export type ActivityLog = {
+  id: string;
+  entity_type: ActivityEntityType;
+  entity_id: string;
+  action: ActivityAction;
+  /** Only changed fields, not a full row snapshot. NULL on creates. */
+  before: Record<string, unknown> | null;
+  /** Only changed fields, not a full row snapshot. NULL on deletes. */
+  after: Record<string, unknown> | null;
+  /** Pre-rendered one-liner for the timeline UI. */
+  summary: string | null;
+  performed_by: string | null;
+  performed_by_name: string | null;
+  performed_by_role: string | null;
+  barangay: string;
+  source: ActivitySource;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export function isActivityAction(s: string): s is ActivityAction {
+  return (ACTIVITY_ACTIONS as readonly string[]).includes(s);
+}
+
+export function isActivityEntityType(s: string): s is ActivityEntityType {
+  return (ACTIVITY_ENTITY_TYPES as readonly string[]).includes(s);
+}
 
 export const CIVIL_STATUS_OPTIONS = [
   "Single",

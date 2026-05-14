@@ -89,6 +89,8 @@ export const recordFormSchema = z
     lifecycle_status: z.enum(LIFECYCLE_VALUES, { error: "Pick a lifecycle status" }),
     /** Phase 2 canonical status. Drives validation; legacy `lifecycle_status` is derived on submit. */
     status: z.enum(STATUS_VALUES, { error: "Pick a record status" }),
+    /** Phase A: optional FK to a LAND (planting_area) farmer_assets row. */
+    farmer_asset_id: z.uuid("Pick a valid land asset").nullable().optional(),
   })
   .superRefine((val, ctx) => {
     const group = commodityGroupForCommodity(val.commodity as any);
