@@ -2,7 +2,7 @@
 
 How **Raze AgroDash** is structured at the application layer: layers, modules, data flow, validation, and conventions. This document focuses on the *application* — for the database side (tables, RLS, migrations, Supabase connection topology), see **`Database Architecture.md`**. For the canonical Phase 1 domain spec, see **`Phase 1 Domain Model.md`**.
 
-Last updated 2026-05-14 after Phase Next (Activity Timeline & Operational History: append-only `activity_logs`, per-record Timeline tab, cross-cutting Activity panel, CSV export).
+Last updated 2026-05-17 after Pilot Hardening Week 1–2 (operational visibility & UX softening): global error boundary, `app_errors` table + `reportError` helper, `validateDomainRecord` wired client + server, soft delete on core tables + admin restore page, data-quality warnings module, confirm-on-finalize, session-expiry banner.
 
 ## 1) Tech stack
 
@@ -97,7 +97,8 @@ The single most important architectural artifact of the Phase 1–4 refactor. Ev
 | `allocation.ts` | Household path: `validateHouseholdCropAllocation`, `sumHouseholdActiveCropAllocationHa`, `canAllocateCropActiveHa`, `findConflictingActiveCropCycle`. **Asset path (Phase A–D)**: `validateLandAssetAllocation`, `sumActiveLandAssetAllocationHa`, `calculateRemainingLandAssetHa`. **Validator results are tagged unions** with `kind: 'capacity' \| 'structure'`; only capacity rejections become activity logs (Phase Next §4). | `addRecord` / `updateRecord` in agri-context; live remaining hint in `RecordFormDialog`; `LandAllocation` panel |
 | `activity.ts` | **Phase Next**: diff helpers (`pickChangedFields`, `pickFields`, `changedKeys`), action resolvers (`resolveAgriRecordUpdateAction`, `resolveFarmerUpdateAction`), summary builders per entity, logged-field lists. Zero React, zero Supabase. | `lib/activity-log.ts`; the 24+ mutation call-sites in `agri-context.tsx` |
 | `severity.ts` | `classifyCropDamageSeverity`, `classifyFisheryLossSeverity`, `classifyLivestockLossSeverity`, `maxSeverity`, chip styles | damage views, risk ranking |
-| `validation.ts` | `validateDomainRecord` returning structured `DomainIssue[]` | wired but not consumed yet |
+| `validation.ts` | `validateDomainRecord` returning structured `DomainIssue[]`; `formatDomainIssues(issues)` shaping for form errors + mutation messages | `RecordFormDialog.validate()` (defense in depth after Zod) **and** `addRecord` / `updateRecord` in `agri-context.tsx` (server-side enforcement — Pilot Hardening) |
+| `warnings.ts` | **Pilot Hardening**: soft-warning channel distinct from validation errors. `DataWarning` (severity `info` / `warn`), `findDuplicateFarmer(input, farmers)` with case-insensitive name + RSBSA-number matching, `farmerDuplicateWarning(match)` UI formatter. | `FarmerFormDialog` (duplicate-farmer guard with "Add Anyway" override). New warning types plug in via the same `DataWarning` shape. |
 | `units.ts` | `Unit`, `cropBagsToMetricTons` (the **only** unit converter; no fishery↔MT, no livestock↔MT) | metrics, charts |
 | `invariants.ts` | 7 `check*`/`assert*` pairs (mixed-units, active-excluded, finalized-has-output, damage ≤ planted, household capacity, fishery never MT, only crop converts to MT) | tests; available for runtime assertions |
 | `audit.ts` | `traceAggregation`, `WithMeta`, `formatAggregationMeta` | wraps every metric function |
@@ -166,6 +167,8 @@ Both validators run in parallel for every record (`validateHouseholdCropAllocati
 
 **Reading utilisation**: the `v_land_asset_allocation` Postgres view and the in-memory `calculateRemainingLandAssetHa()` helper return identical numbers for the same row. The form uses the in-memory helper (already loaded data, reactive to in-flight edits); the `LandAllocation` panel could read either — it currently uses the in-memory path for the same reason.
 
+**Soft delete defensive guard** (Pilot Hardening — migration 020). `cropActiveAllocationHa()` short-circuits to `0` when `r.deleted_at != null`, so a script or test that passes raw rows (bypassing the provider's load filter) can't accidentally double-count a soft-deleted cycle against household or asset capacity. The provider's load query also filters `.is("deleted_at", null)` on the four soft-deletable tables, so the in-memory state shouldn't contain deleted rows in normal operation — the guard is belt-and-suspenders.
+
 ### 3.5 Severity & risk ranking
 
 Per-group classifiers in `severity.ts` produce `LOW`/`MODERATE`/`HIGH`/`CRITICAL`. Crops use absolute hectare thresholds; fishery and livestock use a percentage of stocking when known, falling back to absolute counts otherwise.
@@ -193,6 +196,23 @@ Append-only audit trail for every mutation in the system. Lives in three layers:
 **Cascade rule**. When a mutation cascades to other rows (e.g. `deleteFarmer` strips farmer_id from `agri_records.farmer_ids[]` and removes farmer_assets), the cascade does **not** generate per-row logs. The primary action logs cascade counts in `metadata.cascade`. Prevents log explosions on bulk operations.
 
 **Overflow attempts**. When `validateHouseholdCropAllocation` or `validateLandAssetAllocation` rejects with `kind: 'capacity'`, a `allocation_overflow_attempt` row is logged with `proposed_ha` / `remaining_ha` / pool identity in `metadata`. Structural rejections (missing household, owner mismatch, duplicate cycle) are deliberately not logged — the audit table stays focused on "users trying to overbook", not ordinary form errors.
+
+### 3.7 Data quality warnings (Pilot Hardening)
+
+A **soft-signal channel** distinct from validation errors. Validation blocks the submit; warnings inform the user and offer an explicit override ("Add Anyway"). Defined in `lib/domain/warnings.ts`:
+
+```ts
+type DataWarning = {
+  code: 'duplicate_farmer_name' | 'duplicate_farmer_rsbsa' | ...future codes;
+  severity: 'info' | 'warn';
+  message: string;
+  paths?: string[];   // form fields to highlight
+};
+```
+
+Pilot scope is **duplicate farmer detection** (`findDuplicateFarmer({ name, rsbsa, excludeId }, farmers)`). The matcher normalizes whitespace + case on the name and the RSBSA number; an RSBSA hit takes precedence over a name hit (government-ID match is the stronger signal). `excludeId` lets edit-mode skip the self-match. Wired into `FarmerFormDialog`: on submit, if a match is found, the dialog flips into "warning + Add Anyway" mode so the user can override deliberately.
+
+Future warning types (suspicious yield, high damage on non-calamity submit, incomplete-but-recommended fields, etc.) plug in via the same `DataWarning` shape so the form's rendering / override flow stays uniform. **Out of scope for pilot.**
 
 ## 4) Top-level UI composition
 
@@ -324,13 +344,14 @@ Benefit: explicit dependency graph; future re-render optimizations (e.g. `useCal
 
 ## 6) Form & validation architecture
 
-Validation runs in **three layers**. A bad record needs to fail all three:
+Validation runs in **three blocking layers** plus a **soft-warning layer**. A bad record fails all three blocking layers; warnings inform the user without preventing submit.
 
 | Layer | Where | Catches |
 |---|---|---|
-| **Form schema** (Zod) | `lib/validations.ts → recordFormSchema` | Field types, numeric bounds, required fields, status-evidence rules |
-| **Domain validator** | `lib/domain/validation.ts → validateDomainRecord` | Commodity-field isolation (CROP can't have fishery/livestock fields, etc.), invariants — *currently defined but not yet wired into the form* |
+| **Form schema** (Zod) | `lib/validations.ts → recordFormSchema` | Field types, numeric bounds, required fields, status-evidence rules. First gate in the form. |
+| **Domain validator** | `lib/domain/validation.ts → validateDomainRecord` (+ `formatDomainIssues`) | Commodity-field isolation (CROP can't have fishery/livestock fields, etc.), status-evidence gates, numeric ranges. **Wired since Pilot Hardening**: runs in `RecordFormDialog.validate()` *after* Zod (Zod errors win on shared fields) AND in `addRecord` / `updateRecord` server-side so any future non-form caller (API route, script, bulk import) is held to the same rules. |
 | **DB constraints** | `migrations/008`, `011`, `013` | CHECK constraints; the last line of defense. `15` has the trigger for archived-terminal. |
+| **Data quality warnings** (non-blocking) | `lib/domain/warnings.ts` (see §3.7) | Soft signals — duplicate farmer name / duplicate RSBSA number. Surfaced inline; user can override with "Add Anyway". |
 
 Plus two cross-record checks that are app-only:
 
@@ -385,6 +406,10 @@ All user-facing lists default-sort **A→Z**, case-insensitive, ignoring leading
   - Optional **type-to-confirm** (trimmed, case-insensitive match).
 
 Used by: delete organization (type org name), delete household (type display name), delete subsidy line item, delete asset line item.
+
+- **Confirm-on-finalize** (Pilot Hardening): in `RecordFormDialog`, transitions to a terminal status (`harvested`, `damaged`, `archived`) route through `ConfirmDialog` (non-danger styling) before submit. The form's `submit()` is extracted from `handleSubmit` so the dialog can invoke it after confirmation. Prevents accidental record-locking from a stray dropdown change. Only fires in edit mode and only when the prior `status` is known — pre-Phase-2 rows without a stored status skip the prompt.
+
+- **Soft delete on core tables** (Pilot Hardening — migration 020): `agri_records`, `farmers`, `households`, `farmer_assets` no longer hard-delete from the app. Deleting flips `deleted_at` and the row drops out of the live load query. See §17.3 for behavior changes and the admin restore page.
 
 ## 11) Reporting & export pipeline
 
@@ -463,6 +488,7 @@ flowchart TD
 | **5** | Provider refactor + security | Split `AgriDataProvider` into 4 contexts (Farmers/Programs/Records/Metrics) with thin domain context files; extracted helpers (`normalize.ts`, `insert-rows.ts`, `supabase/errors.ts`); RLS enabled on `agri_records` (migration 016); `agri-context.tsx` shrunk from 1209 → 766 lines (−37%) |
 | **A–D** | Land Asset Allocation | LAND (planting-area) assets become operational allocation sources. Migration 017 adds `agri_records.farmer_asset_id` (nullable FK), a linkage trigger, a `v_land_asset_allocation` view, an `fn_remaining_land_ha` RPC, and reserves GIS-ready columns on `farmer_assets`. Migration 018 reconciles a diverged `farmer_assets` schema. App layer gains `validateLandAssetAllocation` (parallel to the household path), a Land tab with per-lot utilisation, an asset selector in the record form, and a backfill script (`scripts/backfill-land-asset.ts`) for historical rows. Phase E (PostGIS swap, map UI) deliberately deferred. |
 | **Next** | Activity Timeline & Operational History | Append-only `public.activity_logs` (migration 019) records who did what, when. App-side logging from `agri-context.tsx` covers 24+ mutation sites across 7 entity tables; payload is a compact field diff (~200 bytes typical) plus a pre-rendered summary. `lib/domain/activity.ts` (pure: diff/summary/resolver helpers) + `lib/activity-log.ts` (fail-soft writer) + `lib/contexts/activity-context.tsx` (lazy read hooks). UI: per-record Timeline tab in `RecordFormDialog` + admin-only Activity tab in the dashboard shell + CSV export via `lib/export-activity-csv.ts`. Capacity-overflow rejections become `allocation_overflow_attempt` rows. Logs are immutable (no UPDATE/DELETE policies). DB-trigger safety net deliberately deferred; schema reserves room. |
+| **Pilot Hardening (Week 1–2)** | Operational visibility & UX softening for real-world deployment | **Operational visibility**: `public.app_errors` (migration 021) captures caught exceptions; `lib/error-log.ts → reportError()` is fire-and-forget. Global `app/error.tsx` + `app/global-error.tsx` (Next 16 `unstable_retry`) + `components/ErrorBoundary.tsx` class wrapper. **Validation**: `validateDomainRecord` wired client (form) + server (mutations) with `formatDomainIssues` helper. **Soft delete** (migration 020): `deleted_at` + partial indexes on `agri_records` / `farmers` / `households` / `farmer_assets`; four delete mutations swap `.delete()` → `.update({ deleted_at })`; load queries filter `.is("deleted_at", null)`; defensive guard in `cropActiveAllocationHa`. Hard-delete preserved for configuration-like tables (subsidies, organizations). **Restore**: admin-only `app/admin/restore/page.tsx` (50 rows/table, single-click clear). **UX**: friendlier status labels ("Currently Growing", "Harvest Recorded", "Closed") + `RECORD_STATUS_LONG_LABELS`; shared `EmptyState` component; confirm-on-finalize before terminal status transitions; `lib/domain/warnings.ts` with `findDuplicateFarmer` (name + RSBSA) replacing inline duplicate guard; session-expiry banner on `LoginPage` (auth-context distinguishes intentional logout from token revocation). See §17 for the operational hardening overlay summary. |
 
 ### Phase 5 sub-steps (provider refactor)
 
@@ -498,11 +524,28 @@ flowchart TD
 | 5 — Exports & investigation views | ✅ | `useActivityFeed(filter)` in the same context file. `lib/export-activity-csv.ts` (RFC-4180, UTF-8 BOM, 10,000-row cap). `components/dashboard/UserActivityPanel.tsx` — filters + paginated table + Export CSV. Mounted as an admin-only "Activity" tab in `app/page.tsx`. |
 | 6 — DB-trigger safety net | ⏸️ deferred | Schema reserves `source = 'db_trigger'` for a future BEFORE INSERT/UPDATE/DELETE trigger pack that would catch direct service-role SQL writes. Today's surface is fully covered by the app-side path; deferred to avoid trigger-bug risk vs. marginal coverage gain. |
 
+### Pilot Hardening sub-steps (Week 1–2)
+
+| Step | Done | Result |
+|---|---|---|
+| W1.1 — Operational error visibility | ✅ | Migration 021 (`public.app_errors` + RLS mirroring `activity_logs`, append-only, two indexes). `lib/data.ts` `AppError` type + `lib/insert-rows.ts` `appErrorInsertRow`. `lib/error-log.ts → reportError(err, { context, actor })` is fire-and-forget; the helper swallows its own errors so instrumenting a catch block can never crash the caller. Designed to coexist with `activity_logs`: that table records successful domain mutations, `app_errors` records caught exceptions. |
+| W1.2 — Global error boundary | ✅ | `app/error.tsx` (segment-level) + `app/global-error.tsx` (root-layout-level, with own `<html>/<body>` and inline styles since `globals.css` is unavailable) + `components/ErrorBoundary.tsx` (class component for fragile sub-trees, with `resetKey` prop). All three call `reportError(error, { source: 'error-boundary', scope: ... })`. Next 16 convention: `unstable_retry` prop, not the older `reset` (per node_modules/next/dist/docs). |
+| W1.3 — `validateDomainRecord` wired | ✅ | New `formatDomainIssues(issues)` helper in `lib/domain/validation.ts` shapes `DomainIssue[]` into `{ message, fieldErrors }` (mirrors `zodIssuesToErrors`). `RecordFormDialog.validate()` calls it after Zod (Zod errors win on shared fields). `addRecord` + `updateRecord` in `agri-context.tsx` run it server-side after `commodity_group` is set, before allocation checks — defense in depth for non-form callers. |
+| W1.4 — Soft delete + restore | ✅ | Migration 020 adds `deleted_at TIMESTAMPTZ NULL` + partial barangay/farmer indexes on `agri_records` / `farmers` / `households` / `farmer_assets`. `lib/data.ts` adds `deleted_at?: string \| null` to all four types; `lib/normalize.ts` passes the column through. Provider load filters `.is("deleted_at", null)` on all four. Four delete mutations swap `.delete()` → `.update({ deleted_at: now })`. **Cascade behavior change**: household soft-delete no longer detaches subsidies/farmers; farmer soft-delete no longer strips `agri_records.farmer_ids` — references stay intact so restoration is lossless. Defensive guard `r.deleted_at == null` in `cropActiveAllocationHa`. Admin-only `app/admin/restore/page.tsx` lists 50 rows/table with a one-click Restore that clears `deleted_at` and writes an `activity_logs` entry. No "permanent delete" UI surface; service-role SQL is required to truly remove a row (template in migration footer for 90-day retention). |
+| W2.1 — Terminology softening | ✅ | `lib/domain/status.ts` `RECORD_STATUS_LABELS` rewritten in farmer-friendly phrasing ("active" → "Currently Growing", "harvested" → "Harvest Recorded", "archived" → "Closed"). New `RECORD_STATUS_LONG_LABELS` for verbose contexts (admin tools). `DataTable` StatusChip drops uppercase + tracking-wide styling since the new labels read as phrases. |
+| W2.2 — Empty states | ✅ | Shared `components/ui/EmptyState.tsx` (icon + title + description + primary/secondary action; `compact` variant). `DataTable` distinguishes filter-empty ("Clear filters") from truly-empty ("Add a record"). Existing inline empty states in `FarmerRegistry` and `UserActivityPanel` retained — already adequate. |
+| W2.3 — Confirm-on-finalize | ✅ | `RecordFormDialog`: `submit()` extracted from `handleSubmit`; new `pendingTransitionKind()` detects edits where the new status is `harvested` / `damaged` / `archived` *and* differs from the prior status. Re-uses `ConfirmDialog` (non-danger styling) with distinct copy for "Finalize" vs "Close" transitions. Pre-Phase-2 rows without a stored prior status skip the prompt. |
+| W2.4 — Duplicate detection module | ✅ | `lib/domain/warnings.ts` defines `DataWarning` shape + `findDuplicateFarmer({ name, rsbsa, excludeId }, farmers)` with whitespace-normalized name match and RSBSA-number match (RSBSA precedence). `FarmerFormDialog` inline check refactored to use it; warning UI shows the full sentence ("A farmer named X is already registered..." or "RSBSA number already used by X...") and flips submit to "Add Anyway". |
+| W2.5 — Session expiry UX | ✅ | `lib/auth-context.tsx` `onAuthStateChange` distinguishes intentional logout (existing `logoutInProgressRef`) from unexpected `SIGNED_OUT` via a functional `setUser` setter; adds `sessionExpired` state + `clearSessionExpired()` to `AuthContextValue`. `login` clears the flag on success. `LoginPage` shows an amber "Your session expired. Please sign in again." banner above the form (suppressed if there's a normal login error to avoid double messaging). |
+
 ## 14) Key files (index)
 
 ### Application root
 - `app/page.tsx` — dashboard shell, tab routing, deep-link support
 - `app/layout.tsx` — providers (Auth, AgriData), global styles
+- `app/error.tsx` — **Pilot Hardening**: segment-level error boundary (Next 16 `unstable_retry`)
+- `app/global-error.tsx` — **Pilot Hardening**: root-layout error boundary (own `<html>/<body>`, inline styles)
+- `app/admin/restore/page.tsx` — **Pilot Hardening**: admin-only soft-delete restore (50 rows/table, single-click Restore)
 - `middleware.ts` — Next middleware that delegates to `lib/supabase/middleware.ts`
 
 ### Context
@@ -528,6 +571,7 @@ flowchart TD
 - `lib/domain/audit.ts` — `traceAggregation`, `WithMeta`
 - `lib/domain/units.ts` — `Unit` + crop bags ↔ MT (the only converter)
 - `lib/domain/activity.ts` — **Phase Next**: diff helpers, action resolvers, summary builders, logged-field lists
+- `lib/domain/warnings.ts` — **Pilot Hardening**: soft-warning channel (`DataWarning`), duplicate-farmer matcher
 
 ### Data access
 - `lib/supabase/env.ts` · `client.ts` · `server.ts` · `middleware.ts`
@@ -543,6 +587,7 @@ flowchart TD
 - `components/dashboard/ExportButton.tsx` — CSV export (records)
 - `lib/export-activity-csv.ts` — CSV export (activity logs; Phase Next §5)
 - `lib/activity-log.ts` — `logActivity()` fail-soft writer (Phase Next §1)
+- `lib/error-log.ts` — **Pilot Hardening**: `reportError(err, { context, actor })` fail-soft writer for `public.app_errors`
 
 ### UI utilities
 - `lib/sort.ts` — A→Z compare helpers
@@ -574,6 +619,10 @@ flowchart TD
 - `components/ui/ConfirmDialog.tsx`
 - `components/ui/DialogPortal.tsx`
 
+### Error boundaries & empty states (Pilot Hardening)
+- `components/ErrorBoundary.tsx` — class-component wrapper for fragile sub-trees (`resetKey` prop, calls `reportError`)
+- `components/ui/EmptyState.tsx` — shared empty-state surface (icon + title + description + primary/secondary action)
+
 ### Tests & scripts
 - `scripts/test-metrics.ts` — Phase 4 smoke tests (54 cases, all passing)
 - `scripts/seed-supabase-bulk.ts` — bulk seed for dev
@@ -587,9 +636,12 @@ flowchart TD
 | Read the canonical domain spec | `Phase 1 Domain Model.md` |
 | Understand land asset allocation end-to-end | `Phase A Land Asset Allocation.md` |
 | Understand the activity / operational history subsystem | `Phase Next Activity Timeline.md` |
+| Understand the pilot hardening overlay (error visibility, soft delete, UX softening) | §13 Pilot Hardening sub-steps + §17 below |
 | Trace a metric back to source | `lib/domain/metrics.ts` + `scripts/test-metrics.ts` |
 | Add a new record type | start with `lib/data.ts:AgriRecord`, then `commodity.ts`, then `RecordFormDialog` |
 | Tighten validation | `lib/validations.ts` (form) + `lib/domain/validation.ts` (domain) + a migration in `migrations/` |
+| Add a new soft-warning rule | `lib/domain/warnings.ts` (extend `DataWarningCode` + add an `evaluate*` function) — see §3.7 |
+| Capture a new caught-exception site | wrap the catch with `void reportError(err, { context: { fn: '...' } })` — see §17.1 |
 | Migrate a component off `useAgriData()` | See KpiCards (`components/dashboard/KpiCards.tsx`) as reference — declare narrow hook deps |
 | Add a new context slice | `lib/contexts/*-context.tsx` for the type/provider/hook + bundle the value object in `agri-context.tsx` |
 
@@ -598,10 +650,96 @@ flowchart TD
 1. **`useCallback` wrap on mutations** — currently mutations re-create per render, so the per-provider `value` objects also re-create. Wrapping mutations in `useCallback` would let the value memos stabilize and finally deliver true re-render isolation across narrow hook subscribers.
 2. **Full state separation (true Phase F)** — moving state ownership into each provider file would slim `agri-context.tsx` to ~30 lines. Requires resolving cross-cutting mutations (`deleteFarmer` etc.) via shared refs or callback wiring. Estimated 6–10 hours; deferred until clearly needed.
 3. **More component migrations off `useAgriData()`** — `CommodityAnalytics`, `DamageRiskMonitoring`, `DataTable`, `ProgramsView`, `FarmerRegistry` still use the facade. KpiCards is the only migrated component.
-4. **`validateDomainRecord` is dormant** — defined in `lib/domain/validation.ts` but not yet wired into the form. The form still uses `recordFormSchema` from `lib/validations.ts` for client validation.
-5. **DOCX export partial migration** — `lib/export-docx.ts` still has some inline reducers alongside metrics calls.
-6. **`profiles_update_own` escalation vector** — see `Database Architecture.md` §11; latent privilege escalation if a BARANGAY_USER updates their own role/barangay.
-7. **Phase E — PostGIS swap + map UI** — `farmer_assets` already reserves `geom_geojson` (JSONB) + `centroid_lat/lng`. When real spatial queries are needed: enable PostGIS, swap to `geography(MultiPolygon,4326)`, backfill via `ST_GeomFromGeoJSON`, then add `ST_Intersects` to detect true overlap and a `react-leaflet`-based map panel. No code yet.
-8. **`scripts/schema.sql` is incomplete** — bootstrapped only `farmers`/`households`/`agri_records`; missing `farmer_assets`, household_subsidies, commodity_group, Phase 2 `status`, and `agri_records` RLS. Anyone running it gets a DB that needs migrations 002–019 applied separately. Migration 018 documents and reconciles the diverged `farmer_assets` shape that this gap produced in one environment.
-9. **Activity-log DB-trigger safety net (Phase Next §6)** — deliberately not built. App-side covers all 24+ mutation sites today; the only remaining surface is direct service-role SQL writes (seed loads, retention pruning, admin one-offs), and logging those would clutter the audit table with maintenance noise. If automated server-side writes become routine, add a trigger pack tagged `source = 'db_trigger'` — schema already reserves room.
-10. **Activity-log retention pruning is manual** — `activity_logs` grows forever today. No auto-prune; documented manual cleanup query in migration 019's footer. If table size becomes a concern (year 3+), introduce a partition-by-month strategy without changing the API surface.
+4. **DOCX export partial migration** — `lib/export-docx.ts` still has some inline reducers alongside metrics calls.
+5. **`profiles_update_own` escalation vector** — see `Database Architecture.md` §11; latent privilege escalation if a BARANGAY_USER updates their own role/barangay.
+6. **Phase E — PostGIS swap + map UI** — `farmer_assets` already reserves `geom_geojson` (JSONB) + `centroid_lat/lng`. When real spatial queries are needed: enable PostGIS, swap to `geography(MultiPolygon,4326)`, backfill via `ST_GeomFromGeoJSON`, then add `ST_Intersects` to detect true overlap and a `react-leaflet`-based map panel. No code yet.
+7. **`scripts/schema.sql` is incomplete** — bootstrapped only `farmers`/`households`/`agri_records`; missing `farmer_assets`, household_subsidies, commodity_group, Phase 2 `status`, and `agri_records` RLS. Anyone running it gets a DB that needs migrations 002–021 applied separately. Migration 018 documents and reconciles the diverged `farmer_assets` shape that this gap produced in one environment.
+8. **Activity-log DB-trigger safety net (Phase Next §6)** — deliberately not built. App-side covers all 24+ mutation sites today; the only remaining surface is direct service-role SQL writes (seed loads, retention pruning, admin one-offs), and logging those would clutter the audit table with maintenance noise. If automated server-side writes become routine, add a trigger pack tagged `source = 'db_trigger'` — schema already reserves room.
+9. **Activity-log retention pruning is manual** — `activity_logs` grows forever today. No auto-prune; documented manual cleanup query in migration 019's footer. If table size becomes a concern (year 3+), introduce a partition-by-month strategy without changing the API surface. The same applies to `app_errors` (migration 021 footer documents a 90-day cleanup template).
+10. **Pilot Hardening Week 3 not started** — operational resilience overlay still planned: activity-log retry queue (one-shot retry with `localStorage` fallback for `logActivity` failures), provider-load error surface (the 7-table `Promise.all` in `agri-context.tsx` currently logs and continues silently — should surface a reload banner), backup/snapshot runbook, staging environment separation. Documented in the pilot-readiness plan; not yet scheduled.
+11. **Anonymous error capture not supported** — `app_errors` RLS INSERT requires an authenticated caller (any barangay user can insert with their own barangay; admins can insert with NULL). Errors that fire pre-login (e.g. crash in `LoginPage` mount) are not captured. `console.error` still fires in those cases. Acceptable for pilot scale; revisit only if a measurable share of issues turn out to be pre-auth.
+12. **`next/middleware` deprecation** — Next 16 emits a dev warning that the `middleware` file convention is deprecated in favor of `proxy`. Not breaking at the moment. A future maintenance pass should rename `middleware.ts` → `proxy.ts` and update the layer's docs.
+
+## 17) Pilot operational hardening overlay
+
+A focused operational maturity overlay shipped in Week 1–2 of pilot prep (May 2026). Distinct from the Phase 1–5 / A–D / Next architectural phases — this is a hardening sweep, not a new architectural axis. Preserves the existing architecture; surgically adds visibility, safety, and friendlier UX. The complete plan lives in `~/.claude/plans/i-need-help-preparing-synchronous-phoenix.md`.
+
+### 17.1 Operational error visibility
+
+Two channels, distinct purposes:
+
+| Channel | Table | What goes in | Helper | RLS |
+|---|---|---|---|---|
+| Audit (existing — Phase Next) | `public.activity_logs` | Successful domain mutations + `allocation_overflow_attempt` | `lib/activity-log.ts → logActivity()` | barangay-scoped, append-only |
+| Errors (new — Pilot Hardening) | `public.app_errors` | Caught exceptions from `catch` blocks and error boundaries | `lib/error-log.ts → reportError()` | barangay-scoped, append-only (mirrors `activity_logs`) |
+
+**`reportError(err, { context, actor })`** is fire-and-forget. Caller passes an optional `actor` snapshot (typically from `useAuth()`); when omitted, the helper falls back to `supabase.auth.getSession()` for the user id. The helper extracts `Error.message` / `Error.name` / `Error.stack` (truncated at 8 KB), captures `window.location.pathname` + `navigator.userAgent`, and inserts a row. **Every error inside the helper is swallowed** — instrumenting a catch block can never make the app more fragile.
+
+**Error boundaries** call `reportError` with `context: { source: 'error-boundary', scope: 'route-segment' | 'root-layout' | 'sub-tree', label?, componentStack? }`:
+
+- `app/error.tsx` — segment-level (wraps `app/page.tsx` + nested layouts). Next 16 prop is `unstable_retry`, not the older `reset`. Calls `reportError`, shows fallback UI with Try Again + Reload page.
+- `app/global-error.tsx` — root-layout-level (own `<html>/<body>` since `globals.css` is unavailable when the root layout itself throws). Inline styles.
+- `components/ErrorBoundary.tsx` — class component for fragile sub-trees. `<ErrorBoundary label="KpiCards" resetKey={...}>` — accepts a `fallback` prop and a `resetKey` to recover automatically on changing data.
+
+**Triage**: the migration 021 footer documents Studio queries for "what broke in the last 24 hours" and a 90-day retention cleanup template.
+
+### 17.2 Session expiry handling
+
+`lib/auth-context.tsx` differentiates intentional logout from unexpected `SIGNED_OUT` events via the existing `logoutInProgressRef` (which `logout()` sets `true` for the duration of the `signOut()` promise). The `onAuthStateChange` handler uses a **functional `setUser` setter** so the latest user value is visible inside the closure:
+
+```ts
+setUser((prev) => {
+  if (prev && !wasIntentional) setSessionExpired(true);
+  return null;
+});
+```
+
+When a previously-signed-in user transitions to `null` without `logoutInProgressRef`, `sessionExpired` flips true. The flag is exposed in `AuthContextValue` along with `clearSessionExpired()`. `LoginPage` reads it and renders an amber "Your session expired. Please sign in again." banner above the credentials form (suppressed if there's also a normal login error to avoid double-stacking). The flag auto-clears on the next successful `login()`.
+
+URL/state preservation is **not** done in pilot scope — the existing `?tab=...` query is already preserved across the auth bounce, so users land on the same tab. Form-data preservation would add complexity for marginal value at pilot scale.
+
+### 17.3 Soft delete + admin restore
+
+Migration 020 adds `deleted_at TIMESTAMPTZ NULL` + a partial index on the hot path to four tables: `agri_records`, `farmers`, `households`, `farmer_assets`. Configuration-like tables (`household_subsidies`, `organizations`, `farmer_organizations`) intentionally stay hard-delete.
+
+**Provider contract change**. `AgriDataProvider`'s load `Promise.all` adds `.is("deleted_at", null)` to the four soft-deletable tables. So in normal operation, in-memory state contains live rows only — the rest of the app keeps working unchanged.
+
+**Mutation change**. Four delete functions in `agri-context.tsx` swap `.delete()` for `.update({ deleted_at: new Date().toISOString() })`. RLS is **unchanged** — soft-delete is a normal UPDATE, so the existing UPDATE policies on each table already permit it under the same role/barangay rules.
+
+**Cascade behavior change** (worth understanding):
+
+| Mutation | Before (hard delete) | After (soft delete) |
+|---|---|---|
+| `deleteHousehold` | DB cascade nuked subsidies (FK ON DELETE CASCADE); app nulled `farmers.household_id` locally | No DB cascade fires (we UPDATE, not DELETE); subsidies and farmers stay attached for clean restoration. UI lookups for the soft-deleted household return undefined — existing `?.field ?? ""` defenses handle that. |
+| `deleteFarmer` | App stripped farmer's id from `agri_records.farmer_ids[]` via N UPDATEs; DB cascaded `farmer_organizations` | No DB cascade; no record-array stripping. Existing records keep their farmer reference (denormalized `farmer_names`/counts stay as historical snapshots). Restoration is lossless — farmer reappears fully attached. |
+| `deleteRecord` / `deleteFarmerAsset` | Hard delete | Soft delete; no cascade questions to resolve. |
+
+Activity log metadata now reports `preserved: { household_subsidies_attached, farmers_attached }` (etc.) instead of `cascade: { ..._removed }`.
+
+**Defensive guard** in `lib/domain/allocation.ts`: `cropActiveAllocationHa(r)` returns 0 when `r.deleted_at != null`. Belt-and-suspenders against direct callers (scripts, tests, future API routes) that bypass the provider's load filter — see §3.4.
+
+**Restore page** at `app/admin/restore/page.tsx`:
+- Admin-only (auth-context gate + RLS backstop).
+- Fetches `deleted_at IS NOT NULL` rows from each table, sorted by `deleted_at DESC`, capped at 50 per table.
+- One-click Restore: `UPDATE … SET deleted_at = NULL` + an `activity_logs` entry with `summary: 'restored from soft-delete (…)'`.
+- No "permanent delete" UI surface. Service-role SQL is the only way to truly remove a soft-deleted row (90-day cleanup template in the migration footer).
+
+### 17.4 UX softening for non-technical pilot users
+
+Cross-references for items covered above:
+
+- **Status labels**: §3.2 (and the table in §3.7's "Lifecycle state mapping" if you scroll up). Internal enum keys stay (`active` / `harvested` / `damaged` / `archived`); the user-facing labels in `RECORD_STATUS_LABELS` are now phrases ("Currently Growing", "Harvest Recorded", "Damaged", "Closed"). `RECORD_STATUS_LONG_LABELS` is reserved for verbose contexts. `DataTable` StatusChip drops `uppercase` + `tracking-wide` since the new labels read as phrases.
+- **Empty states**: `components/ui/EmptyState.tsx` — shared shape (icon + title + description + primary/secondary action; `compact` mode). `DataTable` distinguishes filter-empty ("Clear filters") from truly-empty ("Add a record"). Other list views' existing inline empty states already adequate.
+- **Confirm-on-finalize**: §10. `RecordFormDialog.submit()` is extracted so `ConfirmDialog` can call it after the user confirms a transition to `harvested` / `damaged` / `archived`.
+- **Duplicate farmer detection**: §3.7. `findDuplicateFarmer` in `lib/domain/warnings.ts` matches on case-insensitive normalized name + RSBSA number. Wired into `FarmerFormDialog` with a two-step "warning → Add Anyway" flow.
+
+### 17.5 What's intentionally NOT in pilot scope
+
+- **No Sentry / Datadog / external monitoring** — `app_errors` is the single channel for the pilot. Admins triage via Supabase Studio.
+- **No `app_errors` dashboard UI** — the activity-log feed UI is the obvious template if a need emerges; deferred.
+- **No anonymous error capture** — RLS INSERT requires auth. Crashes pre-login fall through to `console.error`.
+- **No Tagalog i18n scaffolding** — English-only for pilot, with terminology softened. Tagalog labels deferred pending real pilot feedback.
+- **No form-data preservation on session expiry** — banner only; form state is lost on the auth bounce. Adds complexity for marginal value at pilot scale.
+- **No "permanent delete" UI** — soft delete + service-role SQL is the full lifecycle. Avoiding a destructive admin button is itself the safety control.
+- **No request-level retry wrapper** — only the activity-log retry queue is planned (Week 3). Mutations don't auto-retry; the user does.
+- **No streaming exports** — current 10,000-row cap is adequate for pilot scale.
