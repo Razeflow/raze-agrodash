@@ -55,6 +55,7 @@ import {
 } from "@/lib/contexts/records-context";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 import { isHistoricalOnly } from "@/lib/domain/lifecycle";
+import { validateDomainRecord, formatDomainIssues } from "@/lib/domain/validation";
 import {
   validateHouseholdCropAllocation,
   validateLandAssetAllocation,
@@ -181,14 +182,17 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // Phase 6 (migration 020): four core tables are soft-deletable. The
+        // provider's contract is "live rows only" — admin restore page (and
+        // any future audit view) fetches deleted rows directly.
         const [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes, assetsRes] = await Promise.all([
-          supabase.from("agri_records").select("*"),
-          supabase.from("farmers").select("*"),
-          supabase.from("households").select("*"),
+          supabase.from("agri_records").select("*").is("deleted_at", null),
+          supabase.from("farmers").select("*").is("deleted_at", null),
+          supabase.from("households").select("*").is("deleted_at", null),
           supabase.from("organizations").select("*"),
           supabase.from("farmer_organizations").select("*"),
           supabase.from("household_subsidies").select("*"),
-          supabase.from("farmer_assets").select("*"),
+          supabase.from("farmer_assets").select("*").is("deleted_at", null),
         ]);
         if (cancelled) return;
 
@@ -514,7 +518,14 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   async function deleteFarmerAsset(id: string): Promise<MutationResult> {
     const existing = farmerAssetsRef.current.find((x) => x.id === id);
-    const { error } = await supabase.from("farmer_assets").delete().eq("id", id);
+    // Phase 6 (migration 020): soft delete. The row stays in the DB with
+    // deleted_at set; the load query filters it out. Restoration is via
+    // app/admin/restore.
+    const deletedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("farmer_assets")
+      .update({ deleted_at: deletedAt })
+      .eq("id", id);
     if (error) return { ok: false, message: error.message };
     setFarmerAssets((prev) => prev.filter((x) => x.id !== id));
     if (existing) {
@@ -617,6 +628,17 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       updated_at: now,
     } as AgriRecord;
     newRecord.commodity_group = newRecord.commodity_group ?? commodityGroupForCommodity(newRecord.commodity);
+    // Server-side domain enforcement: commodity field isolation + status
+    // evidence. Defense-in-depth — the form already runs this, but any caller
+    // that bypasses the form (scripts, future API routes) gets the same rules.
+    const domainCheck = validateDomainRecord({
+      record: newRecord,
+      group: newRecord.commodity_group,
+      status: newRecord.status ?? undefined,
+    });
+    if (!domainCheck.ok) {
+      return { ok: false, message: formatDomainIssues(domainCheck.issues).message };
+    }
     const allocationCheck = validateHouseholdCropAllocation({
       record: newRecord,
       households: householdsRef.current,
@@ -660,6 +682,15 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const existing = recordsRef.current.find((r) => r.id === id);
     const merged = ({ ...(existing ?? {}), ...payload, id, updated_at: now } as AgriRecord);
     merged.commodity_group = merged.commodity_group ?? commodityGroupForCommodity(merged.commodity);
+    // Server-side domain enforcement (see addRecord for rationale).
+    const domainCheck = validateDomainRecord({
+      record: merged,
+      group: merged.commodity_group,
+      status: merged.status ?? undefined,
+    });
+    if (!domainCheck.ok) {
+      return { ok: false, message: formatDomainIssues(domainCheck.issues).message };
+    }
     const allocationCheck = validateHouseholdCropAllocation({
       record: merged,
       households: householdsRef.current,
@@ -712,7 +743,13 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   async function deleteRecord(id: string) {
     // Snapshot the row BEFORE the delete so we can log its identity.
     const existing = recordsRef.current.find((r) => r.id === id);
-    const { error } = await supabase.from("agri_records").delete().eq("id", id);
+    // Phase 6 (migration 020): soft delete. The row stays in the DB; the
+    // load query filters it out. Restoration via app/admin/restore.
+    const deletedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("agri_records")
+      .update({ deleted_at: deletedAt })
+      .eq("id", id);
     if (error) {
       console.error("[AgriData] deleteRecord:", error.message);
       return;
@@ -790,17 +827,23 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   async function deleteHousehold(id: string) {
     const existing = householdsRef.current.find((x) => x.id === id);
-    const cascadeSubsidyCount = householdSubsidies.filter((s) => s.household_id === id).length;
-    const cascadeFarmerCount = farmersRef.current.filter((f) => f.household_id === id).length;
-    const { error } = await supabase.from("households").delete().eq("id", id);
+    const preservedSubsidyCount = householdSubsidies.filter((s) => s.household_id === id).length;
+    const preservedFarmerCount = farmersRef.current.filter((f) => f.household_id === id).length;
+    // Phase 6 (migration 020): soft delete. Unlike the prior hard-delete path,
+    // we do NOT cascade-detach farmers or remove subsidies — those rows stay
+    // attached so the household can be restored without re-linking. UI
+    // lookups for the soft-deleted household will return undefined; existing
+    // `?.field ?? ""` defenses handle that.
+    const deletedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("households")
+      .update({ deleted_at: deletedAt })
+      .eq("id", id);
     if (error) {
       console.error("[AgriData] deleteHousehold:", error.message);
       return;
     }
-    // DB cascades subsidies and nulls farmers.household_id; mirror locally.
     setHouseholds((prev) => prev.filter((x) => x.id !== id));
-    setHouseholdSubsidies((prev) => prev.filter((s) => s.household_id !== id));
-    setFarmers((prev) => prev.map((f) => (f.household_id === id ? { ...f, household_id: null } : f)));
     if (existing) {
       void logActivity({
         entityType: "household",
@@ -812,9 +855,11 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         summary: summarizeHouseholdChange("deleted", existing, null),
         actor: actorRef.current,
         metadata: {
-          cascade: {
-            household_subsidies_removed: cascadeSubsidyCount,
-            farmers_detached: cascadeFarmerCount,
+          soft_delete: true,
+          deleted_at: deletedAt,
+          preserved: {
+            household_subsidies_attached: preservedSubsidyCount,
+            farmers_attached: preservedFarmerCount,
           },
         },
       });
@@ -1088,50 +1133,38 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function deleteFarmer(id: string) {
-    // Snapshot BEFORE the delete so the activity log can capture identity
-    // and report what the cascade touched.
+    // Snapshot BEFORE the soft delete so the activity log can capture
+    // identity and report what stays attached.
     const existing = farmersRef.current.find((f) => f.id === id);
-    const cascadeAssetCount = farmerAssetsRef.current.filter((a) => a.farmer_id === id).length;
-    const cascadeRecordIds = recordsRef.current
+    const preservedAssetCount = farmerAssetsRef.current.filter((a) => a.farmer_id === id).length;
+    const preservedRecordIds = recordsRef.current
       .filter((r) => r.farmer_ids?.includes(id))
       .map((r) => r.id);
 
-    const { error } = await supabase.from("farmers").delete().eq("id", id);
+    // Phase 6 (migration 020): soft delete. Unlike the prior hard-delete
+    // path, we do NOT strip the farmer from agri_records.farmer_ids in the
+    // DB, and we do NOT modify farmer_organizations or farmer_assets. Those
+    // references stay intact so a future restore brings the farmer back
+    // fully attached. Denormalized record fields (farmer_names, counts) are
+    // historical snapshots and remain correct.
+    const deletedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("farmers")
+      .update({ deleted_at: deletedAt })
+      .eq("id", id);
     if (error) {
       console.error("[AgriData] deleteFarmer:", error.message);
       return;
     }
-    const remaining = farmersRef.current.filter((f) => f.id !== id);
 
-    // DB cascades farmer_organizations rows for this farmer.
-    // Update agri_records.farmer_ids manually (TEXT[] — no FK).
-    const affected = recordsRef.current.filter((r) => r.farmer_ids?.includes(id));
-    for (const rec of affected) {
-      const newIds = rec.farmer_ids.filter((fid) => fid !== id);
-      const ff = computeFarmerFields(newIds, remaining);
-      const { error: recErr } = await supabase
-        .from("agri_records")
-        .update({ farmer_ids: newIds, ...ff })
-        .eq("id", rec.id);
-      if (recErr) console.error("[AgriData] deleteFarmer record sync:", recErr.message);
-    }
-
-    setFarmers(remaining);
+    // Local state: hide the farmer and their associated rows from the live
+    // view. The DB rows remain untouched (except the farmer's deleted_at),
+    // so a page reload after restoration will surface everything again.
+    setFarmers((prev) => prev.filter((f) => f.id !== id));
     setFarmerOrganizations((prev) => prev.filter((r) => r.farmer_id !== id));
     setFarmerAssets((prev) => prev.filter((a) => a.farmer_id !== id));
-    setRecords((prev) =>
-      prev.map((r) => {
-        if (r.farmer_ids?.includes(id)) {
-          const newIds = r.farmer_ids.filter((fid) => fid !== id);
-          return { ...r, farmer_ids: newIds, ...computeFarmerFields(newIds, remaining) };
-        }
-        return r;
-      }),
-    );
 
     if (existing) {
-      // ONE log entry — cascade effects are captured in metadata, not as
-      // per-row deletes, to avoid log explosions.
       void logActivity({
         entityType: "farmer",
         entityId: id,
@@ -1142,9 +1175,11 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         summary: summarizeFarmerChange("deleted", existing, null),
         actor: actorRef.current,
         metadata: {
-          cascade: {
-            agri_records_touched: cascadeRecordIds.length,
-            farmer_assets_removed: cascadeAssetCount,
+          soft_delete: true,
+          deleted_at: deletedAt,
+          preserved: {
+            agri_records_with_farmer_id: preservedRecordIds.length,
+            farmer_assets_attached: preservedAssetCount,
           },
         },
       });

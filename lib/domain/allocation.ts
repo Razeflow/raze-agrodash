@@ -7,6 +7,10 @@ const FP_EPS = 1e-6;
 
 /** Hectares this row consumes toward household planting capacity (crop cycles only). */
 export function cropActiveAllocationHa(r: RecordLike): number {
+  // Phase 6 (migration 020): defense-in-depth. The provider's load query
+  // already filters out soft-deleted rows, but direct callers (scripts,
+  // tests, future API routes) should not be tripped up by stale rows.
+  if ((r as { deleted_at?: string | null }).deleted_at != null) return 0;
   if (commodityGroupForCommodity(r.commodity) !== "CROP") return 0;
   if (recordStatus(r) !== "active") return 0;
   return Math.max(0, numField(r.planting_area_hectares));

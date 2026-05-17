@@ -25,6 +25,7 @@ import { sortBy } from "@/lib/sort";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 import { recordStatus } from "@/lib/domain/metrics";
 import { calculateRemainingLandAssetHa } from "@/lib/domain/allocation";
+import { validateDomainRecord, formatDomainIssues } from "@/lib/domain/validation";
 import {
   RECORD_STATUSES,
   RECORD_STATUS_LABELS,
@@ -263,6 +264,24 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           }
           return e;
         })();
+
+    // Domain-layer enforcement: commodity field isolation + status evidence.
+    // Runs after Zod so shape errors are caught first. First error per field
+    // wins; Zod errors take precedence over domain errors on the same field.
+    // Cast: STATUS_VALUES is widened to string for Zod's enum, but the runtime
+    // value is always a RecordStatus.
+    const domain = validateDomainRecord({
+      record: { ...form, status: form.status as RecordStatus },
+      status: form.status as RecordStatus,
+    });
+    if (!domain.ok) {
+      const { fieldErrors: domainFieldErrors } = formatDomainIssues(domain.issues);
+      for (const [key, msg] of Object.entries(domainFieldErrors)) {
+        if (!(key in errs) || !errs[key as keyof FormErrors]) {
+          (errs as Record<string, string>)[key] = msg;
+        }
+      }
+    }
 
     // Phase D: require farmer_asset_id for NEW CROP records when the farmer
     // already has at least one eligible planting-area asset on file. Edits of

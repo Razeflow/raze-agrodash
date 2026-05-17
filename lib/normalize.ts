@@ -67,6 +67,9 @@ export function normalizeFarmerAsset(row: Record<string, unknown>): FarmerAsset 
     centroid_lng: row.centroid_lng != null && row.centroid_lng !== "" ? Number(row.centroid_lng) : null,
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
+    // Phase 6 (migration 020): soft-delete marker. The load query filters
+    // these out by default; this is here for the admin restore page.
+    deleted_at: row.deleted_at != null ? String(row.deleted_at) : null,
   };
 }
 
@@ -84,6 +87,8 @@ export function normalizeFarmer(row: Record<string, unknown>): Farmer {
     photo_url: row.photo_url != null ? String(row.photo_url) : null,
     created_at: String(row.created_at ?? ""),
     updated_at: String(row.updated_at ?? ""),
+    // Phase 6 (migration 020): soft-delete marker.
+    deleted_at: row.deleted_at != null ? String(row.deleted_at) : null,
   };
 }
 
@@ -168,6 +173,10 @@ export function normalizeAgriRecord(row: Record<string, unknown>): AgriRecord {
     typeof row.farmer_asset_id === "string" && row.farmer_asset_id.length > 0
       ? row.farmer_asset_id
       : null;
+
+  // Phase 6 (migration 020): soft-delete marker. The load query filters
+  // these out by default; this is here for the admin restore page.
+  base.deleted_at = row.deleted_at != null ? String(row.deleted_at) : null;
 
   return base;
 }

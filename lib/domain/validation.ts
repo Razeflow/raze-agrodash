@@ -219,3 +219,25 @@ export function validateDomainRecord(input: {
   if (issues.length === 0) return { ok: true };
   return { ok: false, issues };
 }
+
+/**
+ * Shape DomainIssue[] for the existing form/error-banner surfaces.
+ *
+ * - `fieldErrors`: keyed by `path[0]` exactly like zodIssuesToErrors in
+ *   lib/validations.ts, so callers can merge it straight into FormErrors.
+ *   First issue per field wins (matches Zod behavior).
+ * - `message`: a single human-readable line for the dialog banner / the
+ *   mutation-layer `{ ok: false, message }` shape. Path-less issues lead.
+ */
+export function formatDomainIssues(issues: DomainIssue[]): {
+  message: string;
+  fieldErrors: Record<string, string>;
+} {
+  const fieldErrors: Record<string, string> = {};
+  for (const issue of issues) {
+    const key = (issue.path[0] ?? "_root") as string;
+    if (!fieldErrors[key]) fieldErrors[key] = issue.message;
+  }
+  const message = issues.map((i) => i.message).join("; ");
+  return { message, fieldErrors };
+}

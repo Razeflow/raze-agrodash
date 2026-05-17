@@ -120,6 +120,8 @@ export type AgriRecord = {
   farmer_asset_id?: string | null;
   created_at: string;          // ISO timestamp
   updated_at: string;          // ISO timestamp
+  /** Soft-delete marker (migration 020). NULL = live, non-NULL = hidden. */
+  deleted_at?: string | null;
 };
 
 export type OrgType = "cooperative" | "association" | "household_group" | "other";
@@ -142,6 +144,8 @@ export type Household = {
   organization_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Soft-delete marker (migration 020). NULL = live, non-NULL = hidden. */
+  deleted_at?: string | null;
 };
 
 export type FarmerOrganizationRow = {
@@ -334,6 +338,8 @@ export type FarmerAsset = {
   centroid_lng?: number | null;
   created_at: string;
   updated_at: string;
+  /** Soft-delete marker (migration 020). NULL = live, non-NULL = hidden. */
+  deleted_at?: string | null;
 };
 
 export function isFarmerAssetCategory(s: string): s is FarmerAssetCategory {
@@ -402,6 +408,8 @@ export type Farmer = {
   photo_url: string | null;
   created_at: string;
   updated_at: string;
+  /** Soft-delete marker (migration 020). NULL = live, non-NULL = hidden. */
+  deleted_at?: string | null;
 };
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -493,6 +501,31 @@ export function isActivityAction(s: string): s is ActivityAction {
 export function isActivityEntityType(s: string): s is ActivityEntityType {
   return (ACTIVITY_ENTITY_TYPES as readonly string[]).includes(s);
 }
+
+/**
+ * Operational error log row. Sibling channel to ActivityLog (audit trail);
+ * this captures caught exceptions and unexpected failures so admins can see
+ * what broke during the pilot. See migrations/021_app_errors.sql and
+ * lib/error-log.ts.
+ */
+export type AppError = {
+  id: string;
+  user_id: string | null;
+  username: string | null;
+  role: string | null;
+  /** NULL = admin-tagged. Barangay users always tag their own barangay. */
+  barangay: string | null;
+  message: string;
+  /** Error.name (TypeError, AbortError, ...). NULL when the thrown value wasn't an Error. */
+  name: string | null;
+  /** Stack truncated at the app layer to keep row size bounded. */
+  stack: string | null;
+  /** Free-form attachment: { fn, recordId, source, ... }. */
+  context: Record<string, unknown> | null;
+  url: string | null;
+  user_agent: string | null;
+  created_at: string;
+};
 
 export const CIVIL_STATUS_OPTIONS = [
   "Single",

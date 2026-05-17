@@ -4,7 +4,7 @@
  * state transitions rather than serialization details.
  */
 
-import type { ActivityLog, AgriRecord, Farmer } from "@/lib/data";
+import type { ActivityLog, AgriRecord, AppError, Farmer } from "@/lib/data";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 
 /** Columns on public.farmers (matches scripts/seed-supabase-bulk.ts). */
@@ -78,5 +78,22 @@ export function activityLogInsertRow(log: Omit<ActivityLog, "created_at">) {
     barangay: log.barangay,
     source: log.source,
     metadata: log.metadata,
+  };
+}
+
+/** Columns on public.app_errors (Pilot hardening, migration 021). */
+export function appErrorInsertRow(e: Omit<AppError, "created_at">) {
+  return {
+    id: e.id,
+    user_id: e.user_id,
+    username: e.username,
+    role: e.role,
+    barangay: e.barangay,
+    message: e.message,
+    name: e.name,
+    stack: e.stack,
+    context: e.context,
+    url: e.url,
+    user_agent: e.user_agent,
   };
 }
