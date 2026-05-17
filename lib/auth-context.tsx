@@ -12,6 +12,19 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import AuthLoadingSkeleton from "@/components/AuthLoadingSkeleton";
+import { debug, error as logError, mount, transition, warn } from "@/lib/debug";
+
+/**
+ * Hard ceiling on the initial-session-restore phase. If `getSession()`
+ * hangs or throws silently and we never resolve `loading=false`, the app
+ * white-screens (the provider renders nothing). After this timeout we
+ * force loading=false so the user lands on the LoginPage and can retry.
+ *
+ * Tune up if extension workers regularly see "could not restore session"
+ * banners on cold networks; tune down only if you're sure auth is healthy.
+ */
+const AUTH_RESTORE_TIMEOUT_MS = 10_000;
 
 // ── Types (exported so downstream can import) ──────────────────────────
 
@@ -56,6 +69,13 @@ export type AuthContextValue = {
   sessionExpired: boolean;
   /** Manually dismiss the session-expired banner. */
   clearSessionExpired: () => void;
+  /** Set when the initial session-restore phase failed (network error or
+   * the AUTH_RESTORE_TIMEOUT_MS hard ceiling). LoginPage surfaces a
+   * banner. Distinct from `sessionExpired` (which fires after a known
+   * good session was revoked). */
+  restoreError: string | null;
+  /** Manually dismiss the restore-error banner. */
+  clearRestoreError: () => void;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────
@@ -99,6 +119,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [allUsers, setAllUsers] = useState<ManagedUser[]>([]);
   const [sessionExpired, setSessionExpired] = useState(false);
+  /** Set true when the initial session-restore phase fails (throw or timeout).
+   * Surfaces as a banner on LoginPage so users know to retry instead of
+   * staring at a frozen screen. */
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const fetchProfile = useCallback(
     async (userId: string): Promise<UserProfile | null> => {
@@ -114,17 +138,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   // ── Session restoration + auth state subscription ─────────────────
+  //
+  // Pilot hardening (white-screen fix): the prior version awaited
+  // `getSession()` with no try/catch and gated render on `loading=true`.
+  // Any throw inside the IIFE left `loading` true forever, producing a
+  // permanent blank screen on reload (Supabase rejection, slow network,
+  // stale auth cookie, env var miss). Now:
+  //   1. wrap the restore in try/catch so a throw still resolves loading
+  //   2. enforce a hard timeout so a HANG also resolves loading
+  //   3. surface a friendly restoreError so users can retry instead of
+  //      staring at a frozen page (rendered as a banner on LoginPage)
   useEffect(() => {
+    mount("AuthProvider");
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    function finishLoading(reason: "ok" | "throw" | "timeout", detail?: string) {
+      if (cancelled) return;
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (reason !== "ok") {
+        warn(`Auth: restore failed (${reason})`, detail ?? "");
+        setRestoreError(
+          reason === "timeout"
+            ? "Couldn't reach the server in time. Please sign in again."
+            : "Couldn't restore your previous session. Please sign in again.",
+        );
+      }
+      transition("Auth", "loading", "ready", { reason, hasSession: reason === "ok" });
+      setLoading(false);
+    }
+
+    timeoutId = setTimeout(() => finishLoading("timeout"), AUTH_RESTORE_TIMEOUT_MS);
 
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id);
-        if (!cancelled) setUser(profile);
+      try {
+        debug("Auth: getSession() start");
+        const { data, error: sessionErr } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (sessionErr) {
+          // Supabase returned an explicit error — treat as no-session, but log.
+          logError("Auth: getSession() returned error", sessionErr);
+          finishLoading("throw", sessionErr.message);
+          return;
+        }
+        const session = data?.session ?? null;
+        if (session?.user) {
+          debug("Auth: session restored, fetching profile", { userId: session.user.id });
+          try {
+            const profile = await fetchProfile(session.user.id);
+            if (cancelled) return;
+            if (!profile) {
+              warn("Auth: session valid but profile missing — signing out for safety");
+              // Best-effort sign-out so RLS doesn't think we're still that user.
+              try { await supabase.auth.signOut(); } catch { /* ignore */ }
+              setUser(null);
+            } else {
+              setUser(profile);
+            }
+          } catch (profileErr) {
+            if (cancelled) return;
+            logError("Auth: fetchProfile threw", profileErr);
+            // Don't strand the user — clear local user state and proceed to login.
+            setUser(null);
+          }
+        }
+        finishLoading("ok");
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        finishLoading("throw", msg);
       }
-      if (!cancelled) setLoading(false);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -155,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+      if (timeoutId !== null) clearTimeout(timeoutId);
       sub.subscription.unsubscribe();
     };
   }, [fetchProfile]);
@@ -200,14 +287,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const profile = await fetchProfile(data.user.id);
       if (!profile) return "Account is missing a profile. Contact an administrator.";
       setUser(profile);
-      // Successful sign-in clears any prior expired-session banner.
+      // Successful sign-in clears any prior expired-session / restore banner.
       setSessionExpired(false);
+      setRestoreError(null);
       return true;
     },
     [fetchProfile],
   );
 
   const clearSessionExpired = useCallback(() => setSessionExpired(false), []);
+  const clearRestoreError = useCallback(() => setRestoreError(null), []);
 
   // ── logout ─────────────────────────────────────────────────────────
   // Clear UI immediately; finish signOut before router.refresh() so middleware
@@ -279,11 +368,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       allUsers,
       sessionExpired,
       clearSessionExpired,
+      restoreError,
+      clearRestoreError,
     }),
-    [user, login, logout, changePassword, resetUserPassword, allUsers, sessionExpired, clearSessionExpired],
+    [user, login, logout, changePassword, resetUserPassword, allUsers, sessionExpired, clearSessionExpired, restoreError, clearRestoreError],
   );
 
-  if (loading) return null;
+  // Pilot hardening: never return `null` from the loading branch — that's
+  // what produced the white-screen-on-reload bug. Render a skeleton so the
+  // user always sees something while the session restores.
+  if (loading) return <AuthLoadingSkeleton />;
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

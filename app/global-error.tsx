@@ -15,6 +15,8 @@
 import { useEffect } from "react";
 import { reportError } from "@/lib/error-log";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 export default function GlobalError({
   error,
   unstable_retry,
@@ -106,6 +108,40 @@ export default function GlobalError({
             >
               ref: <span style={{ userSelect: "all" }}>{error.digest}</span>
             </p>
+          ) : null}
+          {IS_DEV ? (
+            <details
+              open
+              style={{
+                marginTop: 16,
+                borderRadius: 16,
+                border: "1px solid #fecaca",
+                background: "#fef2f2",
+                padding: 12,
+                fontSize: 12,
+                color: "#991b1b",
+              }}
+            >
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>Dev details</summary>
+              <p style={{ marginTop: 8, fontFamily: '"Space Mono", monospace' }}>
+                {error.name}: {error.message}
+              </p>
+              {error.stack ? (
+                <pre
+                  style={{
+                    marginTop: 8,
+                    maxHeight: 280,
+                    overflow: "auto",
+                    whiteSpace: "pre-wrap",
+                    fontFamily: '"Space Mono", monospace',
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {error.stack}
+                </pre>
+              ) : null}
+            </details>
           ) : null}
           <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
             <button

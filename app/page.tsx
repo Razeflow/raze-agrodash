@@ -71,6 +71,21 @@ export default function Page() {
   const [overviewDateFrom, setOverviewDateFrom] = useState("");
   const [overviewDateTo, setOverviewDateTo] = useState("");
   const [shellReady, setShellReady] = useState(false);
+  // Pilot hardening: compute "today" on the client only. Doing it during
+  // render produces a hydration mismatch (server clock ≠ browser clock,
+  // especially around the Manila day boundary). Start blank and fill on
+  // mount — the user sees the date the instant React hydrates.
+  const [today, setToday] = useState<string>("");
+  useEffect(() => {
+    setToday(
+      new Date().toLocaleDateString("en-US", {
+        timeZone: "Asia/Manila",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      }),
+    );
+  }, []);
 
   useEffect(() => {
     if (!isAdminOrAbove && overviewSection === "rankings") {
@@ -130,7 +145,6 @@ export default function Page() {
 
   const roleBadge = user?.role === "SUPER_ADMIN" ? "Super Admin" : user?.role === "ADMIN" ? "Admin" : user?.barangay || "User";
   const initials = (user?.displayName || "U").split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
-  const today = new Date().toLocaleDateString("en-US", { timeZone: "Asia/Manila", month: "long", day: "numeric", year: "numeric" });
 
   return (
     <div

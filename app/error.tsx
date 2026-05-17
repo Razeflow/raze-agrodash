@@ -15,6 +15,8 @@ import { useEffect } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { reportError } from "@/lib/error-log";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 export default function Error({
   error,
   unstable_retry,
@@ -35,7 +37,7 @@ export default function Error({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-6 py-12">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur-xl">
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur-xl">
         <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-600">
           <AlertTriangle size={24} aria-hidden />
         </div>
@@ -49,6 +51,19 @@ export default function Error({
             ref: <span className="select-all">{error.digest}</span>
           </p>
         ) : null}
+
+        {IS_DEV ? (
+          <details className="mt-4 rounded-2xl border border-red-100 bg-red-50/40 p-3 text-xs text-red-800/90" open>
+            <summary className="cursor-pointer font-semibold">Dev details</summary>
+            <p className="mt-2 font-mono text-red-700">{error.name}: {error.message}</p>
+            {error.stack ? (
+              <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-red-700/90">
+                {error.stack}
+              </pre>
+            ) : null}
+          </details>
+        ) : null}
+
         <div className="mt-6 flex flex-wrap gap-3">
           <button
             type="button"

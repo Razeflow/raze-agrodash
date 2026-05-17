@@ -84,6 +84,7 @@ import {
 import { logActivity, type ActivityActor } from "@/lib/activity-log";
 import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
+import { debug, mount, time, timeEnd, transition, warn } from "@/lib/debug";
 import { friendlyDbError } from "./supabase/errors";
 import { sortBy } from "./sort";
 import { fullNameSortKey, lastNameSortKey } from "./name";
@@ -167,6 +168,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
   /* ── Load from Supabase on login ──────────────────────────────── */
   useEffect(() => {
+    mount("AgriDataProvider", { isLoggedIn });
     if (!isLoggedIn) {
       setRecords([]);
       setFarmers([]);
@@ -181,10 +183,12 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     (async () => {
+      time("AgriData.load");
       try {
         // Phase 6 (migration 020): four core tables are soft-deletable. The
         // provider's contract is "live rows only" — admin restore page (and
         // any future audit view) fetches deleted rows directly.
+        debug("AgriData: fetching 7 tables");
         const [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes, assetsRes] = await Promise.all([
           supabase.from("agri_records").select("*").is("deleted_at", null),
           supabase.from("farmers").select("*").is("deleted_at", null),
@@ -200,27 +204,56 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
           .map((r) => r.error)
           .filter(Boolean);
         if (errs.length > 0) {
+          // Surface every per-table error to the console so a partial load
+          // (e.g. one RLS policy mismatch) is visible. Keep the defaults
+          // (empty arrays) so the rest of the app still renders.
           console.error("[AgriData] Supabase load errors:", errs);
+          warn("AgriData: partial load — some tables failed", { errorCount: errs.length });
         }
 
-        setRecords(
-          (recordsRes.data ?? [])
-            .filter((r: Record<string, unknown>) => validBarangays.has(String(r.barangay)))
-            .map((r: Record<string, unknown>) => normalizeAgriRecord(r)),
-        );
-        setFarmers((farmersRes.data ?? []).map((r: Record<string, unknown>) => normalizeFarmer(r)));
-        setHouseholds((householdsRes.data ?? []) as Household[]);
-        setOrganizations((orgsRes.data ?? []) as Organization[]);
-        setFarmerOrganizations((farmerOrgsRes.data ?? []) as FarmerOrganizationRow[]);
-        setHouseholdSubsidies(
-          (subsRes.data ?? []).map((r: Record<string, unknown>) => normalizeHouseholdSubsidy(r)),
-        );
-        setFarmerAssets(
-          (assetsRes.data ?? []).map((r: Record<string, unknown>) => normalizeFarmerAsset(r)),
-        );
+        // Defensive: each setX call independently catches a normalize-time
+        // throw so one bad row can't blank the entire provider. Each branch
+        // falls back to an empty array on failure.
+        try {
+          setRecords(
+            (recordsRes.data ?? [])
+              .filter((r: Record<string, unknown>) => validBarangays.has(String(r.barangay)))
+              .map((r: Record<string, unknown>) => normalizeAgriRecord(r)),
+          );
+        } catch (e) { console.error("[AgriData] normalize records failed", e); setRecords([]); }
+        try {
+          setFarmers((farmersRes.data ?? []).map((r: Record<string, unknown>) => normalizeFarmer(r)));
+        } catch (e) { console.error("[AgriData] normalize farmers failed", e); setFarmers([]); }
+        try {
+          setHouseholds((householdsRes.data ?? []) as Household[]);
+        } catch (e) { console.error("[AgriData] cast households failed", e); setHouseholds([]); }
+        try {
+          setOrganizations((orgsRes.data ?? []) as Organization[]);
+        } catch (e) { console.error("[AgriData] cast organizations failed", e); setOrganizations([]); }
+        try {
+          setFarmerOrganizations((farmerOrgsRes.data ?? []) as FarmerOrganizationRow[]);
+        } catch (e) { console.error("[AgriData] cast farmer_organizations failed", e); setFarmerOrganizations([]); }
+        try {
+          setHouseholdSubsidies(
+            (subsRes.data ?? []).map((r: Record<string, unknown>) => normalizeHouseholdSubsidy(r)),
+          );
+        } catch (e) { console.error("[AgriData] normalize subsidies failed", e); setHouseholdSubsidies([]); }
+        try {
+          setFarmerAssets(
+            (assetsRes.data ?? []).map((r: Record<string, unknown>) => normalizeFarmerAsset(r)),
+          );
+        } catch (e) { console.error("[AgriData] normalize farmer_assets failed", e); setFarmerAssets([]); }
+
+        transition("AgriData", "loading", "ready", {
+          records: recordsRes.data?.length ?? 0,
+          farmers: farmersRes.data?.length ?? 0,
+          households: householdsRes.data?.length ?? 0,
+          errors: errs.length,
+        });
       } catch (err) {
         if (!cancelled) console.error("[AgriData] Supabase load error:", err);
       } finally {
+        timeEnd("AgriData.load");
         if (!cancelled) setLoaded(true);
       }
     })();

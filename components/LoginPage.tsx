@@ -62,7 +62,7 @@ function Swoop({ className }: { className?: string }) {
 }
 
 export default function LoginPage() {
-  const { login, sessionExpired, clearSessionExpired } = useAuth();
+  const { login, sessionExpired, clearSessionExpired, restoreError, clearRestoreError } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -202,7 +202,7 @@ export default function LoginPage() {
               Enter your credentials to access the dashboard.
             </p>
 
-            {sessionExpired && !error && (
+            {sessionExpired && !error && !restoreError && (
               <div className="mb-5 flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50/90 px-3.5 py-2.5 text-sm text-amber-800">
                 <Clock size={16} className="mt-0.5 shrink-0 text-amber-500" />
                 <div className="flex-1">
@@ -214,6 +214,24 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={clearSessionExpired}
+                  className="text-xs font-medium text-amber-700/80 hover:text-amber-900"
+                  aria-label="Dismiss"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {restoreError && !error && (
+              <div className="mb-5 flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50/90 px-3.5 py-2.5 text-sm text-amber-800">
+                <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+                <div className="flex-1">
+                  <p className="font-medium">Couldn&apos;t restore your session.</p>
+                  <p className="mt-0.5 text-xs text-amber-700/90">{restoreError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearRestoreError}
                   className="text-xs font-medium text-amber-700/80 hover:text-amber-900"
                   aria-label="Dismiss"
                 >
