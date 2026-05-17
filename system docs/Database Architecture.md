@@ -117,7 +117,10 @@ USING (
 | `farmer_assets` | Inherits the farmer's barangay scope | Same |
 | `agri_records` | Own barangay, or admin-or-above (migration `016`) | Same; `WITH CHECK` on INSERT/UPDATE prevents writing rows tagged with another barangay |
 | `activity_logs` | Own barangay, or admin-or-above (migration `019`) | INSERT only — barangay user must tag the row with their own barangay; admins can tag any (including the `'ALL'` sentinel for cross-barangay org actions). **No UPDATE or DELETE policies** — logs are immutable for every authenticated caller; privileged cleanup runs via the service role only. |
+| `app_errors` | Own barangay, or admin-or-above (migration `021`) | INSERT only — barangay user must tag the row with their own barangay; admins can tag any (NULL barangay allowed for admin-only errors). **No UPDATE or DELETE policies** — errors are immutable; cleanup runs via the service role only. **Anonymous callers are blocked** — pre-login crashes fall through to `console.error` and are not captured. |
 | `profiles` | Self-row visible; admin-or-above sees all | Self + admin-or-above |
+
+**Soft-delete columns** (migration 020). `agri_records`, `farmers`, `households`, and `farmer_assets` each gained a nullable `deleted_at TIMESTAMPTZ`. Soft-delete is a normal UPDATE — the existing UPDATE policies on each table already permit it under the same role/barangay rules, so **no new RLS policies are required**. The app's load query filters `.is("deleted_at", null)` everywhere by default; the admin restore page (`app/admin/restore`) fetches deleted rows directly via the SELECT policy (which doesn't filter — admins see deleted rows, barangay users see their own barangay's deleted rows). Service-role hard-delete remains available for true removal.
 
 ## 6. Database schema
 
@@ -228,6 +231,34 @@ Triggers:
 
 **No triggers**. The Phase Next plan deliberately deferred a DB-trigger safety net; the `source` column reserves room without forcing the trigger path now.
 
+### `app_errors` — Pilot Hardening schema (migration 021)
+
+Sibling channel to `activity_logs`: same append-only RLS shape, but captures **caught exceptions** rather than successful mutations. Written from `lib/error-log.ts → reportError()` inside `catch` blocks across the app (mutations, exports, the three error-boundary surfaces — `app/error.tsx`, `app/global-error.tsx`, `components/ErrorBoundary.tsx`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid PK | `gen_random_uuid()` default. |
+| `created_at` | timestamptz NOT NULL DEFAULT `now()` | Server-side clock. |
+| `user_id` | uuid | `auth.uid()` snapshot. Nullable for forward-compatibility — pilot scope requires auth (the INSERT policy rejects anonymous callers). |
+| `username` / `role` | text / text | Denormalized actor snapshot like `activity_logs.performed_by_name`. Survives later profile edits. |
+| `barangay` | text | RLS scope. NULL = admin-tagged (super-admin / admin without barangay). Barangay users must insert with their own barangay. |
+| `message` | text NOT NULL | `Error.message` (or stringified value when the thrown thing wasn't an Error). Truncated app-side at 2 KB. |
+| `name` | text | `Error.name` (`TypeError`, `AbortError`, …). NULL when the thrown value wasn't an Error. |
+| `stack` | text | `Error.stack`, truncated app-side at 8 KB to keep row size bounded. |
+| `context` | jsonb | Free-form attachment, e.g. `{ fn: 'addRecord', recordId: '…', source: 'error-boundary', scope: 'route-segment' }`. The triage workhorse — every `reportError` call passes a small context object. |
+| `url` | text | `window.location.pathname + search` at error time. |
+| `user_agent` | text | `navigator.userAgent` at error time. |
+
+**Indexes**:
+- `idx_app_errors_created (created_at DESC)` — drives "what broke in the last 24 hours" Studio queries.
+- `idx_app_errors_barangay (barangay, created_at DESC) WHERE barangay IS NOT NULL` — partial index for per-barangay triage. NULL-barangay rows (admin-only) go through the non-partial index.
+
+**Policies**: SELECT + INSERT only, mirroring `activity_logs`. **No UPDATE policy, no DELETE policy** — errors are append-only for every authenticated caller. The migration's footer documents a 90-day retention cleanup template (service-role only).
+
+**No UI dashboard**. Pilot triage is via Supabase Studio. If a UI surface becomes necessary later, the `UserActivityPanel` is the obvious template (same RLS shape, same cursor-pagination pattern would apply).
+
+**`reportError` ergonomics**. The helper is fire-and-forget and swallows every internal failure (RLS rejection, table missing, network error) with a `console.warn`. Caller signature: `reportError(err, { context?, actor? })`. When `actor` is omitted, the helper falls back to `supabase.auth.getSession()` for the user id only (no profile fetch — keeps the helper free of side-effect chains).
+
 ## 7. How a typical operation flows
 
 ### Read on dashboard mount
@@ -245,18 +276,20 @@ Triggers:
 ```
 1. RecordFormDialog → recordFormSchema (zod) validates shape + status evidence
    • Phase D: requires farmer_asset_id for NEW CROP records when the farmer has any eligible planting-area asset
+   • Pilot Hardening: validateDomainRecord() runs after Zod (defense in depth — commodity field isolation, status evidence)
 2. addRecord(payload) in agri-context.tsx:
    a. computeFarmerFields() — denormalizes farmer_male / farmer_female / total_farmers from the registry
-   b. validateHouseholdCropAllocation() — enforces household capacity ceiling for legacy rows (lib/domain/allocation.ts)
+   b. validateDomainRecord() — Pilot Hardening: server-side enforcement of commodity-field isolation + status-evidence gates. Rejects with formatDomainIssues(...).message so non-form callers (scripts, future API routes) get the same rules.
+   c. validateHouseholdCropAllocation() — enforces household capacity ceiling for legacy rows (lib/domain/allocation.ts)
       • If rejected with kind='capacity', Phase Next §4 logs an allocation_overflow_attempt before returning
-   c. validateLandAssetAllocation() — enforces asset-level capacity + linkage when farmer_asset_id is set (Phase A–D)
+   d. validateLandAssetAllocation() — enforces asset-level capacity + linkage when farmer_asset_id is set (Phase A–D)
       • Same overflow-logging branch on capacity-kind rejection
-   d. agriRecordInsertRow() — maps form payload to DB column shape (includes derived lifecycle_status, new status, and farmer_asset_id)
-   e. supabase.from("agri_records").insert(...) — server runs CHECK constraints AND trg_validate_record_asset
+   e. agriRecordInsertRow() — maps form payload to DB column shape (includes derived lifecycle_status, new status, and farmer_asset_id)
+   f. supabase.from("agri_records").insert(...) — server runs CHECK constraints AND trg_validate_record_asset
 3. On success:
    a. setRecords(prev => [...prev, newRecord]) — optimistic local update
    b. logActivity({...}) — Phase Next §1 fire-and-forget insert into activity_logs (fail-soft; console-warn on error, never rolls back)
-   On error: friendlyDbError() translates Postgres error codes (23514 = CHECK violation) into user-readable messages
+   On error: friendlyDbError() translates Postgres error codes (23514 = CHECK violation) into user-readable messages. (Pilot Hardening note: wrapping the mutation catch blocks with reportError() is a documented follow-up — see §11 — so failed mutations appear in public.app_errors. Today only the error boundaries and the admin restore page call reportError; the mutation catches still console.error only.)
 ```
 
 ### Activity log emission (Phase Next)
@@ -280,9 +313,24 @@ Reads use cursor pagination on `(created_at DESC, id DESC)` — `useActivityLog`
 
 ```
 1. RecordFormDialog status dropdown gates options via canTransition(savedStatus, candidate)
-2. On submit, deriveLifecycleFromStatus(status, damageTotal, prevLifecycle) computes the legacy lifecycle_status for back-compat
-3. UPDATE agri_records SET status = $new, lifecycle_status = $derived ...
-4. If new.status was changing OUT of 'archived', the BEFORE UPDATE trigger (migration 015) raises an exception that surfaces to the form as an error message
+2. Pilot Hardening: if the new status is harvested/damaged/archived AND differs from the prior status, a ConfirmDialog intercepts before submit
+3. On confirm, deriveLifecycleFromStatus(status, damageTotal, prevLifecycle) computes the legacy lifecycle_status for back-compat
+4. UPDATE agri_records SET status = $new, lifecycle_status = $derived ...
+5. If new.status was changing OUT of 'archived', the BEFORE UPDATE trigger (migration 015) raises an exception that surfaces to the form as an error message
+```
+
+### Delete a record / farmer / household / farmer asset (Pilot Hardening — soft delete)
+
+```
+1. UI gestures (delete button + DeleteConfirmDialog) are unchanged from before migration 020
+2. The delete function in agri-context.tsx now runs UPDATE rather than DELETE:
+   UPDATE <table> SET deleted_at = now() WHERE id = $1
+3. RLS is unchanged — the existing UPDATE policy already gates this under the same role/barangay rules
+4. Cascade behavior change: DB ON DELETE CASCADE no longer fires (no DELETE happened). The deleteFarmer/deleteHousehold mutations no longer modify dependent rows in agri_records.farmer_ids or household_subsidies / farmer.household_id — references stay intact so a future restore is lossless.
+5. Local state: the row is filtered out of in-memory arrays so it disappears from the live view immediately
+6. Activity log: a 'deleted' event is logged with metadata.preserved counts (instead of the prior metadata.cascade counts)
+7. Restore: an admin opens app/admin/restore, clicks Restore on a row, the page runs UPDATE … SET deleted_at = NULL and writes a follow-up 'updated' activity_logs entry with summary 'restored from soft-delete (…)'
+8. Permanent delete: not exposed in the UI. Admins run `DELETE FROM <table> WHERE deleted_at IS NOT NULL` from the SQL Editor (90-day retention template in migration 020's footer)
 ```
 
 ## 8. Migration timeline
@@ -308,8 +356,10 @@ Reads use cursor pagination on `(created_at DESC, id DESC)` — `useActivityLog`
 | **017** | `017_land_allocation.sql` | **A (Land Asset Allocation)** | Adds `agri_records.farmer_asset_id` (nullable FK) + partial index; `trg_validate_record_asset` BEFORE INSERT/UPDATE trigger; reserves five GIS-ready columns on `farmer_assets` (`parcel_label`, `parcel_code`, `geom_geojson`, `centroid_lat/_lng`); creates `v_land_asset_allocation` view (`security_invoker=true`) and `fn_remaining_land_ha` RPC. Idempotent — section 3 also adds `area_hectares` defensively, so it self-heals if 007 was applied incompletely. |
 | **018** | `018_farmer_assets_reset.sql` | **A (Land Asset Allocation, reconciliation)** | One-time reset of `farmer_assets` when the table was bootstrapped out-of-band with a diverged shape (`asset_type` instead of `category`, `size_or_quantity` instead of separate `quantity`/`area_hectares`, plus extra `name`/`location` columns) that didn't match migrations 007/009 or the app code. Drops with CASCADE (data is verified 0 rows before running), recreates the canonical schema with the GIS-ready columns from 017, and restores RLS + realtime. Run before re-applying 017. |
 | **019** | `019_activity_logs.sql` | **Next (Activity Timeline & Operational History)** | Adds `public.activity_logs` (append-only audit table) + three composite indexes + SELECT/INSERT RLS policies (no UPDATE/DELETE — logs are immutable by Postgres default-deny). CHECK constraints lock down `entity_type`, `action`, `source`. Realtime publication membership added. App-side primary; `source = 'db_trigger'` reserved for a future safety-net trigger that's not built today. |
+| **020** | `020_soft_delete.sql` | **Pilot Hardening (Week 1)** | Adds `deleted_at TIMESTAMPTZ NULL` + a partial barangay/farmer-id index `(barangay) WHERE deleted_at IS NULL` (and `(farmer_id) WHERE …` for `farmer_assets`) on the four soft-deletable tables: `agri_records`, `farmers`, `households`, `farmer_assets`. **No new RLS policies** — soft-delete is a normal UPDATE, gated by the existing UPDATE policies. **Hard-delete preserved for configuration-like tables** (`household_subsidies`, `organizations`, `farmer_organizations`). Idempotent. Paired rollback in `migrations/rollback/020_rollback.sql`. The footer documents a 90-day service-role hard-delete cleanup template. |
+| **021** | `021_app_errors.sql` | **Pilot Hardening (Week 1)** | Adds `public.app_errors` — sibling table to `activity_logs` for caught exceptions. Two indexes (`(created_at DESC)` for "what broke today" + partial `(barangay, created_at DESC) WHERE barangay IS NOT NULL` for per-barangay triage). SELECT + INSERT RLS policies mirror `activity_logs`; NULL-barangay rows are admin-only. **No UPDATE / DELETE policies** — errors are append-only. Anonymous INSERTs are blocked. Idempotent. Paired rollback in `migrations/rollback/021_rollback.sql`. Footer documents a 90-day retention cleanup. |
 
-Phases 3 (UI) and 4 (analytics) added no migrations — pure app-layer work. Phase 5 is security hardening. Phase A (Land Asset Allocation) introduces migrations 017–018; Phase E (PostGIS swap) is deferred. Phase Next (Activity Timeline) introduces migration 019; the optional DB-trigger safety net for it is also deferred.
+Phases 3 (UI) and 4 (analytics) added no migrations — pure app-layer work. Phase 5 is security hardening. Phase A (Land Asset Allocation) introduces migrations 017–018; Phase E (PostGIS swap) is deferred. Phase Next (Activity Timeline) introduces migration 019; the optional DB-trigger safety net for it is also deferred. Pilot Hardening (Week 1) introduces 020 (soft delete) + 021 (`app_errors`) — both have paired rollback scripts under `migrations/rollback/`.
 
 ## 9. Environment
 
@@ -370,11 +420,14 @@ These are tracked here so they don't get lost.
 4. **No service role usage on the server.** Server components use the same anon key with the cookie session. Privileged admin operations (e.g. bulk imports) currently happen via the SQL Editor, not via the app.
 5. **Singleton browser client is module-scoped, not per-tab-isolated.** If you ever need multi-account sign-in, change the singleton pattern in `client.ts`.
 6. **Allocation capacity is app-only.** `validateHouseholdCropAllocation` and `validateLandAssetAllocation` both run in `lib/agri-context.tsx` mutations, not in Postgres. The Phase A trigger (`trg_validate_record_asset`) enforces the asset linkage rules but **not** the capacity sum — direct SQL inserts could still overflow. If defense-in-depth is needed, add a `BEFORE INSERT OR UPDATE` trigger on `agri_records` that aggregates active CROP `planting_area_hectares` per asset (and per household, for legacy rows) and raises on overflow.
-7. **`scripts/schema.sql` is partial.** Bootstraps only `farmers`/`households`/`agri_records` — does not include `farmer_assets`, `household_subsidies`, `commodity_group`, Phase 2 `status`, or `agri_records` RLS. Anyone running it cold needs migrations 002–018 applied separately. Migration 018 exists specifically to reconcile a real environment where this gap produced a diverged `farmer_assets` shape.
+7. **`scripts/schema.sql` is partial.** Bootstraps only `farmers`/`households`/`agri_records` — does not include `farmer_assets`, `household_subsidies`, `commodity_group`, Phase 2 `status`, `agri_records` RLS, the soft-delete columns (migration 020), or `app_errors` (migration 021). Anyone running it cold needs migrations 002–021 applied separately. Migration 018 exists specifically to reconcile a real environment where this gap produced a diverged `farmer_assets` shape.
 8. **Phase E — PostGIS swap.** `farmer_assets` already reserves `geom_geojson` (JSONB) and `centroid_lat/_lng`. When real spatial queries are wanted: install PostGIS, add `geom geography(MultiPolygon, 4326)`, backfill from `geom_geojson` via `ST_GeomFromGeoJSON`, and add `ST_Intersects` checks for true overlap. No migration committed for this step.
 9. **Activity-log DB-trigger safety net.** Phase Next §6 deliberately deferred a per-table BEFORE INSERT/UPDATE/DELETE trigger pack that would catch direct service-role SQL writes (the only surface not covered by app-side logging today). Schema reserves `source = 'db_trigger'` and the column-level shape so the trigger pack can be added without further migration churn. Defer until automated server-side writes become routine.
-10. **Activity-log retention is manual.** `activity_logs` grows unbounded; migration 019's footer documents a manual cleanup pattern but no auto-prune is installed. If table size becomes a concern (year 3+), partition by month — the API surface (RLS, indexes, app code) stays unchanged.
+10. **Append-only table retention is manual.** Both `activity_logs` and `app_errors` grow unbounded today. The migration footers document service-role retention templates (3 years and 90 days respectively) but no auto-prune is installed. If table size becomes a concern (year 3+), partition by month — the API surface (RLS, indexes, app code) stays unchanged.
+11. **Mutation catch blocks don't yet call `reportError`** (Pilot Hardening follow-up). `lib/error-log.ts → reportError()` ships and the three error-boundary surfaces use it. The ~9 `console.error` sites inside `lib/agri-context.tsx` (mutation catch blocks) and the form dialogs still log to console only. Wrapping them is the cheapest remaining visibility win — single-line additions next to each existing `console.error`. Tracked in the Pilot Hardening Week 3 backlog.
+12. **`app_errors` doesn't capture anonymous errors.** The INSERT policy requires an authenticated caller. Crashes that fire before login (e.g. inside `LoginPage`'s mount path) fall through to `console.error` only. Acceptable for pilot scale; revisit only if a measurable share of issues turn out to be pre-auth.
+13. **No DB-side enforcement of soft delete on reads.** The app's load query filters `.is("deleted_at", null)` everywhere, but a direct SQL `SELECT *` (Studio, service-role script) returns deleted rows by default. No partial filtered RLS USING clause was added — that would have changed the SELECT contract for the admin restore page and the Studio triage flow. Defer unless a real misuse appears.
 
 ---
 
-*Last updated 2026-05-14 after Phase Next (Activity Timeline). When the schema changes, update §6 and §8. When the connection style changes (e.g. adding realtime), update §1 and §3.*
+*Last updated 2026-05-17 after Pilot Hardening Week 1 (soft delete on core tables + `app_errors` for caught-exception triage; migrations 020–021). When the schema changes, update §5 (RLS table), §6 (per-table sections), and §8 (timeline). When the connection style changes (e.g. adding realtime), update §1 and §3.*
