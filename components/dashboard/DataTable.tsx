@@ -24,6 +24,7 @@ import {
 import RecordFormDialog from "./RecordFormDialog";
 import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import BentoCard from "@/components/ui/BentoCard";
+import EmptyState from "@/components/ui/EmptyState";
 
 const COMMODITIES = ["All", "Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"];
 
@@ -40,8 +41,11 @@ function CommodityBadge({ name }: { name: string }) {
 }
 
 function StatusChip({ status }: { status: RecordStatus }) {
+  // Labels are now farmer-friendly phrases ("Currently Growing"), so drop
+  // the uppercase / tracking-wide styling that suited the old enum-style
+  // labels. Keep the chip colors and shape.
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${RECORD_STATUS_CHIP_STYLES[status]}`}>
+    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${RECORD_STATUS_CHIP_STYLES[status]}`}>
       {RECORD_STATUS_LABELS[status]}
     </span>
   );
@@ -316,15 +320,39 @@ export default function DataTable() {
         {/* ── Compact record cards ────────────────────────────────── */}
         {filtered.length === 0 ? (
           <BentoCard>
-            <div className="py-10 text-center">
-              <p className="text-sm text-slate-400">
-                No records match your filters. {hasActiveFilter ? (
-                  <button onClick={clearFilters} className="font-bold text-emerald-600 hover:underline">Clear filters</button>
-                ) : (
-                  <button onClick={openAdd} className="font-bold text-emerald-600 hover:underline">Add the first record</button>
-                )}
-              </p>
-            </div>
+            {hasActiveFilter ? (
+              <EmptyState
+                icon={Filter}
+                title="No records match your filters"
+                description="Try a different barangay, commodity, or date range — or clear filters to see everything."
+                action={
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800"
+                  >
+                    <X size={14} aria-hidden />
+                    Clear filters
+                  </button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={Wheat}
+                title="No records yet"
+                description="Start tracking what farmers are growing. Add your first production record to get started."
+                action={
+                  <button
+                    type="button"
+                    onClick={openAdd}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700"
+                  >
+                    <Plus size={14} aria-hidden />
+                    Add a record
+                  </button>
+                }
+              />
+            )}
           </BentoCard>
         ) : (
           <>

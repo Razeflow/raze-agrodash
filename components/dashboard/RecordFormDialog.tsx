@@ -19,6 +19,7 @@ import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
 import DialogPortal from "@/components/ui/DialogPortal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import FarmerSelectDialog from "./FarmerSelectDialog";
 import { recordFormSchema, RECORD_LIMITS, zodIssuesToErrors, type RecordFormInput } from "@/lib/validations";
 import { sortBy } from "@/lib/sort";
@@ -138,6 +139,9 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Pilot hardening: gate finalize/archive transitions behind a confirm dialog
+  // so users don't accidentally lock a record.
+  const [confirmFinalize, setConfirmFinalize] = useState<"finalize" | "archive" | null>(null);
   // Phase Next: which tab is active. Only "timeline" is reachable in edit mode.
   const [activeTab, setActiveTab] = useState<"details" | "timeline">("details");
 
@@ -320,6 +324,20 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     if (submitted) setErrors((e) => ({ ...e, commodity: undefined }));
   }
 
+  // Detect a status change that should be confirmed. Returns null when no
+  // confirm is needed. Only fires in edit mode and only when the prior
+  // status is known (pre-Phase-2 rows skip the prompt).
+  function pendingTransitionKind(): "finalize" | "archive" | null {
+    if (mode !== "edit") return null;
+    const prev = initialData?.status;
+    if (!prev) return null;
+    const next = form.status as RecordStatus;
+    if (next === prev) return null;
+    if (next === "harvested" || next === "damaged") return "finalize";
+    if (next === "archived") return "archive";
+    return null;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
@@ -328,6 +346,19 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
+    // Gate finalize/archive transitions behind a confirm so users don't
+    // accidentally lock a record. Validation has already passed, so the
+    // confirm only intercepts a clean submission.
+    const kind = pendingTransitionKind();
+    if (kind && !confirmFinalize) {
+      setConfirmFinalize(kind);
+      return;
+    }
+
+    await submit();
+  }
+
+  async function submit() {
     // Phase 2: `status` is the canonical contract; legacy `lifecycle_status`
     // is derived so existing aggregators / DB constraints stay green.
     const damageTotal =
@@ -802,6 +833,24 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           setForm((f) => ({ ...f, farmer_ids: ids }));
           if (submitted) setErrors((er) => ({ ...er, farmer_ids: undefined }));
         }}
+      />
+
+      <ConfirmDialog
+        open={confirmFinalize !== null}
+        danger={false}
+        title={confirmFinalize === "archive" ? "Close this record?" : "Finalize this record?"}
+        description={
+          confirmFinalize === "archive"
+            ? "Closing makes this record read-only. You can still view and report on it, but its values can't be changed afterward."
+            : "Finalizing locks in this cycle's harvest or damage values. After this, the only change allowed is closing the record permanently."
+        }
+        confirmLabel={confirmFinalize === "archive" ? "Close record" : "Finalize"}
+        cancelLabel="Keep editing"
+        onConfirm={async () => {
+          setConfirmFinalize(null);
+          await submit();
+        }}
+        onClose={() => setConfirmFinalize(null)}
       />
     </>
   );

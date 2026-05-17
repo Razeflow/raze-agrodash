@@ -50,6 +50,12 @@ export type AuthContextValue = {
   ) => Promise<{ success: boolean; error?: string }>;
   resetUserPassword: (username: string, newPw: string) => Promise<boolean>;
   allUsers: ManagedUser[];
+  /** True when the previously-signed-in user was signed out unexpectedly
+   * (token revoked, expired, signed out from another tab). The LoginPage
+   * shows a friendly banner when this is set. Cleared on next login. */
+  sessionExpired: boolean;
+  /** Manually dismiss the session-expired banner. */
+  clearSessionExpired: () => void;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────
@@ -92,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [allUsers, setAllUsers] = useState<ManagedUser[]>([]);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const fetchProfile = useCallback(
     async (userId: string): Promise<UserProfile | null> => {
@@ -128,8 +135,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (event === "SIGNED_OUT" || !session?.user) {
+        const wasIntentional = logoutInProgressRef.current;
         logoutInProgressRef.current = false;
-        setUser(null);
+        // Functional setter so we see the latest `user` value (the closure
+        // could be stale). If a user was previously signed in and this
+        // wasn't an intentional logout, surface the session-expired banner.
+        setUser((prev) => {
+          if (prev && !wasIntentional) setSessionExpired(true);
+          return null;
+        });
         setAllUsers([]);
         return;
       }
@@ -186,10 +200,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const profile = await fetchProfile(data.user.id);
       if (!profile) return "Account is missing a profile. Contact an administrator.";
       setUser(profile);
+      // Successful sign-in clears any prior expired-session banner.
+      setSessionExpired(false);
       return true;
     },
     [fetchProfile],
   );
+
+  const clearSessionExpired = useCallback(() => setSessionExpired(false), []);
 
   // ── logout ─────────────────────────────────────────────────────────
   // Clear UI immediately; finish signOut before router.refresh() so middleware
@@ -259,8 +277,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       changePassword,
       resetUserPassword,
       allUsers,
+      sessionExpired,
+      clearSessionExpired,
     }),
-    [user, login, logout, changePassword, resetUserPassword, allUsers],
+    [user, login, logout, changePassword, resetUserPassword, allUsers, sessionExpired, clearSessionExpired],
   );
 
   if (loading) return null;

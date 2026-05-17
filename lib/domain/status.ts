@@ -4,12 +4,25 @@ export type RecordStatus = "active" | "harvested" | "damaged" | "archived";
 
 export const RECORD_STATUSES: RecordStatus[] = ["active", "harvested", "damaged", "archived"];
 
-/** Display labels for the new lifecycle. Used by form dropdown, badges, table chips. */
+/**
+ * Display labels for the lifecycle. Used by form dropdown, badges, table
+ * chips. Phrased in farmer-facing language rather than the technical enum
+ * keys ("Active" → "Currently Growing") so non-technical extension workers
+ * understand the state at a glance. Keep these short enough to fit a chip.
+ */
 export const RECORD_STATUS_LABELS: Record<RecordStatus, string> = {
-  active: "Active",
-  harvested: "Harvested",
+  active: "Currently Growing",
+  harvested: "Harvest Recorded",
   damaged: "Damaged",
-  archived: "Archived",
+  archived: "Closed",
+};
+
+/** Long-form labels for verbose contexts (admin tools, audit timelines). */
+export const RECORD_STATUS_LONG_LABELS: Record<RecordStatus, string> = {
+  active: "Currently Growing",
+  harvested: "Harvest Recorded",
+  damaged: "Damaged (≥50% loss)",
+  archived: "Closed (Historical)",
 };
 
 /** One-line hint shown under the form dropdown to explain each state. */

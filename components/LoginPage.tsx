@@ -1,6 +1,6 @@
 "use client";
 import { useState, useId } from "react";
-import { Sprout, LogIn, AlertCircle } from "lucide-react";
+import { Sprout, LogIn, AlertCircle, Clock } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 const PRIMARY = "#15803D";
@@ -62,7 +62,7 @@ function Swoop({ className }: { className?: string }) {
 }
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, sessionExpired, clearSessionExpired } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -201,6 +201,26 @@ export default function LoginPage() {
             <p className="mb-6 mt-1 text-xs text-slate-500">
               Enter your credentials to access the dashboard.
             </p>
+
+            {sessionExpired && !error && (
+              <div className="mb-5 flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50/90 px-3.5 py-2.5 text-sm text-amber-800">
+                <Clock size={16} className="mt-0.5 shrink-0 text-amber-500" />
+                <div className="flex-1">
+                  <p className="font-medium">Your session expired.</p>
+                  <p className="mt-0.5 text-xs text-amber-700/90">
+                    Please sign in again to continue where you left off.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearSessionExpired}
+                  className="text-xs font-medium text-amber-700/80 hover:text-amber-900"
+                  aria-label="Dismiss"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
 
             {error && (
               <div className="mb-5 flex items-center gap-2 rounded-2xl border border-red-100 bg-red-50/90 px-3.5 py-2.5 text-sm text-red-700">

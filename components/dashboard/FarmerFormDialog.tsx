@@ -11,6 +11,7 @@ import { uploadFarmerPhoto } from "@/lib/farmer-photo";
 import { farmerFormSchema, zodIssuesToErrors } from "@/lib/validations";
 import { sortBy } from "@/lib/sort";
 import { combineNameParts, splitHumanName } from "@/lib/name";
+import { findDuplicateFarmer, farmerDuplicateWarning } from "@/lib/domain/warnings";
 
 type Props = {
   open: boolean;
@@ -188,10 +189,20 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
     }
 
     if (!forceAdd) {
-      const trimmed = combinedName.trim().toLowerCase();
-      const existing = (farmersByBarangay[barangay] || []).find((f) => f.name.trim().toLowerCase() === trimmed);
-      if (existing) {
-        setDupeWarning(existing.name);
+      // Pilot hardening: case-insensitive name match + RSBSA-number match
+      // within the barangay. RSBSA hits take precedence over name hits since
+      // the government ID is the stronger signal. See lib/domain/warnings.ts.
+      const match = findDuplicateFarmer(
+        {
+          name: combinedName,
+          rsbsa: rsbsaNumber.trim() || null,
+          excludeId: mode === "edit" ? initialData?.id : null,
+        },
+        farmersByBarangay[barangay] || [],
+      );
+      if (match) {
+        const warning = farmerDuplicateWarning(match);
+        setDupeWarning(warning.message);
         setForceAdd(true);
         return;
       }
@@ -294,12 +305,14 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
             )}
 
             {dupeWarning && (
-              <div className="mb-4 rounded-2xl bg-amber-50/70 border border-amber-200/50 px-4 py-2.5 text-sm text-amber-700 flex items-center gap-2">
-                <AlertTriangle size={16} className="shrink-0 text-amber-500" />
-                <span>
-                  A farmer named <strong>&quot;{dupeWarning}&quot;</strong> already exists in {barangay}. Click &quot;Add
-                  Anyway&quot; to proceed.
-                </span>
+              <div className="mb-4 flex items-start gap-2 rounded-2xl border border-amber-200/50 bg-amber-50/70 px-4 py-2.5 text-sm text-amber-700">
+                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+                <div>
+                  <p>{dupeWarning}</p>
+                  <p className="mt-0.5 text-xs text-amber-600/80">
+                    Click <strong>Add Anyway</strong> if this is a different person.
+                  </p>
+                </div>
               </div>
             )}
 
