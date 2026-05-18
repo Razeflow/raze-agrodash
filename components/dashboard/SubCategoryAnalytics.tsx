@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { useAgriData } from "@/lib/agri-context";
 import { productionOutputForRecord } from "@/lib/data";
-import { COMMODITY_COLORS } from "@/lib/data";
+import { COMMODITY_COLORS, COMMODITY_OPTIONS } from "@/lib/data";
 import BentoCard from "@/components/ui/BentoCard";
 import { Warehouse } from "lucide-react";
 
@@ -18,7 +18,10 @@ const tooltipStyle = {
   boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
 };
 
-const COMMODITIES = ["Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"] as const;
+// Use the canonical list from lib/data.ts so a new commodity (e.g. Livestock)
+// automatically appears as a tab here — previously the hardcoded list dropped
+// Livestock even though the rendering logic below supports it.
+const COMMODITIES = COMMODITY_OPTIONS;
 
 type SubCategoryBarRow = { name: string; output: number; mt?: number };
 

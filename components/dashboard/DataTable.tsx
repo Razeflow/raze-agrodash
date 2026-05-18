@@ -4,6 +4,7 @@ import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import {
   COMMODITY_COLORS,
+  COMMODITY_OPTIONS,
   formatPeriod,
   formatDatePH,
   MONTH_NAMES,
@@ -26,7 +27,9 @@ import DeleteConfirmDialog from "./DeleteConfirmDialog";
 import BentoCard from "@/components/ui/BentoCard";
 import EmptyState from "@/components/ui/EmptyState";
 
-const COMMODITIES = ["All", "Rice", "Corn", "Fishery", "High Value Crops", "Industrial Crops"];
+// Derive from the canonical commodity list so a new commodity (e.g. Livestock)
+// auto-appears as a filter option. "All" stays as the dropdown's neutral.
+const COMMODITIES = ["All", ...COMMODITY_OPTIONS];
 
 function CommodityBadge({ name }: { name: string }) {
   const color = COMMODITY_COLORS[name] || "#888";
