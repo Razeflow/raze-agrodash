@@ -292,7 +292,7 @@ Sibling channel to `activity_logs`: same append-only RLS shape, but captures **c
    On error: friendlyDbError() translates Postgres error codes (23514 = CHECK violation) into user-readable messages. (Pilot Hardening note: wrapping the mutation catch blocks with reportError() is a documented follow-up — see §11 — so failed mutations appear in public.app_errors. Today only the error boundaries and the admin restore page call reportError; the mutation catches still console.error only.)
 ```
 
-### Activity log emission (Phase Next)
+### Activity log emission (Phase Next, retry-hardened in Week 3)
 
 Every mutation in `agri-context.tsx` follows the same shape — successful Supabase write, then a fire-and-forget `logActivity(...)`:
 
@@ -302,10 +302,16 @@ Every mutation in `agri-context.tsx` follows the same shape — successful Supab
    b. Short-circuits empty-diff updates (no fields changed → no log).
    c. Builds the row via lib/insert-rows.ts → activityLogInsertRow().
    d. supabase.from("activity_logs").insert(row).
-   e. On error: console.warn(...) and return { ok: false, reason }. NEVER throws.
+   e. On error: WAIT 2s and retry once. If retry also fails, queue the
+      row to localStorage['agro:activity-log-retry'] (50-entry cap,
+      24h TTL, FIFO eviction). NEVER throws.
+   f. On any future successful call, opportunistically flush the queue
+      (one shot per queued row; failures stay queued).
 2. Identity comes from useAuth() snapshotted into actorRef.current (refreshed by effect).
 3. RLS gates the INSERT: WITH CHECK requires barangay = caller's barangay (admins bypass).
 ```
+
+The retry path covers transient failures (token rotation, network blip, short Supabase outage). Pilot Hardening Week 3, item 11 — see `System Architecture.md` §17.6.
 
 Reads use cursor pagination on `(created_at DESC, id DESC)` — `useActivityLog` for per-entity, `useActivityFeed` for cross-cutting; both in `lib/contexts/activity-context.tsx`.
 
@@ -359,7 +365,7 @@ Reads use cursor pagination on `(created_at DESC, id DESC)` — `useActivityLog`
 | **020** | `020_soft_delete.sql` | **Pilot Hardening (Week 1)** | Adds `deleted_at TIMESTAMPTZ NULL` + a partial barangay/farmer-id index `(barangay) WHERE deleted_at IS NULL` (and `(farmer_id) WHERE …` for `farmer_assets`) on the four soft-deletable tables: `agri_records`, `farmers`, `households`, `farmer_assets`. **No new RLS policies** — soft-delete is a normal UPDATE, gated by the existing UPDATE policies. **Hard-delete preserved for configuration-like tables** (`household_subsidies`, `organizations`, `farmer_organizations`). Idempotent. Paired rollback in `migrations/rollback/020_rollback.sql`. The footer documents a 90-day service-role hard-delete cleanup template. |
 | **021** | `021_app_errors.sql` | **Pilot Hardening (Week 1)** | Adds `public.app_errors` — sibling table to `activity_logs` for caught exceptions. Two indexes (`(created_at DESC)` for "what broke today" + partial `(barangay, created_at DESC) WHERE barangay IS NOT NULL` for per-barangay triage). SELECT + INSERT RLS policies mirror `activity_logs`; NULL-barangay rows are admin-only. **No UPDATE / DELETE policies** — errors are append-only. Anonymous INSERTs are blocked. Idempotent. Paired rollback in `migrations/rollback/021_rollback.sql`. Footer documents a 90-day retention cleanup. |
 
-Phases 3 (UI) and 4 (analytics) added no migrations — pure app-layer work. Phase 5 is security hardening. Phase A (Land Asset Allocation) introduces migrations 017–018; Phase E (PostGIS swap) is deferred. Phase Next (Activity Timeline) introduces migration 019; the optional DB-trigger safety net for it is also deferred. Pilot Hardening (Week 1) introduces 020 (soft delete) + 021 (`app_errors`) — both have paired rollback scripts under `migrations/rollback/`.
+Phases 3 (UI) and 4 (analytics) added no migrations — pure app-layer work. Phase 5 is security hardening. Phase A (Land Asset Allocation) introduces migrations 017–018; Phase E (PostGIS swap) is deferred. Phase Next (Activity Timeline) introduces migration 019; the optional DB-trigger safety net for it is also deferred. Pilot Hardening (Week 1) introduces 020 (soft delete) + 021 (`app_errors`) — both have paired rollback scripts under `migrations/rollback/`. **Pilot Hardening (Week 2–3) added no migrations** — those phases are app-side UX + resilience work plus operational runbook documentation (`docs/BACKUP_RUNBOOK.md`, `docs/STAGING_SETUP.md`).
 
 ## 9. Environment
 
@@ -424,10 +430,10 @@ These are tracked here so they don't get lost.
 8. **Phase E — PostGIS swap.** `farmer_assets` already reserves `geom_geojson` (JSONB) and `centroid_lat/_lng`. When real spatial queries are wanted: install PostGIS, add `geom geography(MultiPolygon, 4326)`, backfill from `geom_geojson` via `ST_GeomFromGeoJSON`, and add `ST_Intersects` checks for true overlap. No migration committed for this step.
 9. **Activity-log DB-trigger safety net.** Phase Next §6 deliberately deferred a per-table BEFORE INSERT/UPDATE/DELETE trigger pack that would catch direct service-role SQL writes (the only surface not covered by app-side logging today). Schema reserves `source = 'db_trigger'` and the column-level shape so the trigger pack can be added without further migration churn. Defer until automated server-side writes become routine.
 10. **Append-only table retention is manual.** Both `activity_logs` and `app_errors` grow unbounded today. The migration footers document service-role retention templates (3 years and 90 days respectively) but no auto-prune is installed. If table size becomes a concern (year 3+), partition by month — the API surface (RLS, indexes, app code) stays unchanged.
-11. **Mutation catch blocks don't yet call `reportError`** (Pilot Hardening follow-up). `lib/error-log.ts → reportError()` ships and the three error-boundary surfaces use it. The ~9 `console.error` sites inside `lib/agri-context.tsx` (mutation catch blocks) and the form dialogs still log to console only. Wrapping them is the cheapest remaining visibility win — single-line additions next to each existing `console.error`. Tracked in the Pilot Hardening Week 3 backlog.
+11. **Mutation catch blocks don't yet call `reportError`** (Pilot Hardening follow-up). `lib/error-log.ts → reportError()` ships and the error-boundary surfaces + admin restore page use it. The ~9 `console.error` sites inside `lib/agri-context.tsx` (mutation catch blocks) and the form dialogs still log to console only. Wrapping them is the cheapest remaining visibility win — single-line additions next to each existing `console.error`. Originally a Week 3 backlog item; deferred. The activity-log retry queue (Week 3) covers the *audit* channel's transient failures, but failed *mutations* (the user-visible "save failed" cases) still don't surface to `app_errors`.
 12. **`app_errors` doesn't capture anonymous errors.** The INSERT policy requires an authenticated caller. Crashes that fire before login (e.g. inside `LoginPage`'s mount path) fall through to `console.error` only. Acceptable for pilot scale; revisit only if a measurable share of issues turn out to be pre-auth.
 13. **No DB-side enforcement of soft delete on reads.** The app's load query filters `.is("deleted_at", null)` everywhere, but a direct SQL `SELECT *` (Studio, service-role script) returns deleted rows by default. No partial filtered RLS USING clause was added — that would have changed the SELECT contract for the admin restore page and the Studio triage flow. Defer unless a real misuse appears.
 
 ---
 
-*Last updated 2026-05-17 after Pilot Hardening Week 1 (soft delete on core tables + `app_errors` for caught-exception triage; migrations 020–021). When the schema changes, update §5 (RLS table), §6 (per-table sections), and §8 (timeline). When the connection style changes (e.g. adding realtime), update §1 and §3.*
+*Last updated 2026-05-18 after Pilot Hardening Week 3 (no new migrations — Week 3 was app-side resilience + operational runbooks; the schema introduced in Week 1 is unchanged). When the schema changes, update §5 (RLS table), §6 (per-table sections), and §8 (timeline). When the connection style changes (e.g. adding realtime), update §1 and §3.*

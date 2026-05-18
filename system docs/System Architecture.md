@@ -2,7 +2,7 @@
 
 How **Raze AgroDash** is structured at the application layer: layers, modules, data flow, validation, and conventions. This document focuses on the *application* — for the database side (tables, RLS, migrations, Supabase connection topology), see **`Database Architecture.md`**. For the canonical Phase 1 domain spec, see **`Phase 1 Domain Model.md`**.
 
-Last updated 2026-05-17 after Pilot Hardening Week 1–2 (operational visibility & UX softening): global error boundary, `app_errors` table + `reportError` helper, `validateDomainRecord` wired client + server, soft delete on core tables + admin restore page, data-quality warnings module, confirm-on-finalize, session-expiry banner.
+Last updated 2026-05-18 after Pilot Hardening Week 1–3 (operational visibility, UX softening, and resilience): global error boundary, `app_errors` table + `reportError` helper, `validateDomainRecord` wired client + server, soft delete on core tables + admin restore page, data-quality warnings module, confirm-on-finalize, session-expiry banner, white-screen-on-reload fix (try/catch + skeleton + 10s timeout in AuthProvider; per-provider crash isolation), activity-log retry queue with localStorage fallback, provider-load error banner with Retry, backup runbook + staging env documentation.
 
 ## 1) Tech stack
 
@@ -186,6 +186,8 @@ Append-only audit trail for every mutation in the system. Lives in three layers:
 | Impure read | `lib/contexts/activity-context.tsx` | Two bare hooks (no Provider): `useActivityLog(entityType, entityId)` for the per-record Timeline tab, `useActivityFeed(filter)` for the cross-cutting User Activity panel. Both cursor-paginated. |
 
 **App-side primary, DB triggers deferred**. Every mutation in `agri-context.tsx` (24+ call-sites across 7 entity tables) fires `logActivity(...)` after a successful Supabase write. The orchestrator is the single chokepoint for all writes, holds the auth context, and knows the *semantic* action (not just "an UPDATE happened"). The schema reserves `source = 'db_trigger'` for a future safety net, but no triggers are installed today — see §16.
+
+**Retry queue (Pilot Hardening Week 3)**. The original `logActivity` made a single insert attempt and dropped the row silently on failure (logged a `console.warn` but didn't surface). Now: one retry with a 2s backoff, then if both attempts fail the row is queued to `localStorage` under `agro:activity-log-retry` (capped at 50 entries, 24h TTL). Any subsequent successful `logActivity` opportunistically flushes the queue. Surface unchanged for callers (`void logActivity(...)`); new diagnostics exports `getActivityLogRetryQueueSize()` and `flushActivityLogRetryQueue()` for an optional admin view later. See §17.
 
 **Semantic actions, not CRUD verbs**. `resolveAgriRecordUpdateAction(before, after)` picks the most specific label from a diff: `archived` > `status_changed` > `land_allocation_changed` > `damage_updated` > `updated`. `resolveFarmerUpdateAction` similarly promotes `household_transferred` when `household_id` changes. The `before`/`after` payload always carries every changed field regardless of which label wins; the label drives icon + color in the UI.
 
@@ -488,7 +490,7 @@ flowchart TD
 | **5** | Provider refactor + security | Split `AgriDataProvider` into 4 contexts (Farmers/Programs/Records/Metrics) with thin domain context files; extracted helpers (`normalize.ts`, `insert-rows.ts`, `supabase/errors.ts`); RLS enabled on `agri_records` (migration 016); `agri-context.tsx` shrunk from 1209 → 766 lines (−37%) |
 | **A–D** | Land Asset Allocation | LAND (planting-area) assets become operational allocation sources. Migration 017 adds `agri_records.farmer_asset_id` (nullable FK), a linkage trigger, a `v_land_asset_allocation` view, an `fn_remaining_land_ha` RPC, and reserves GIS-ready columns on `farmer_assets`. Migration 018 reconciles a diverged `farmer_assets` schema. App layer gains `validateLandAssetAllocation` (parallel to the household path), a Land tab with per-lot utilisation, an asset selector in the record form, and a backfill script (`scripts/backfill-land-asset.ts`) for historical rows. Phase E (PostGIS swap, map UI) deliberately deferred. |
 | **Next** | Activity Timeline & Operational History | Append-only `public.activity_logs` (migration 019) records who did what, when. App-side logging from `agri-context.tsx` covers 24+ mutation sites across 7 entity tables; payload is a compact field diff (~200 bytes typical) plus a pre-rendered summary. `lib/domain/activity.ts` (pure: diff/summary/resolver helpers) + `lib/activity-log.ts` (fail-soft writer) + `lib/contexts/activity-context.tsx` (lazy read hooks). UI: per-record Timeline tab in `RecordFormDialog` + admin-only Activity tab in the dashboard shell + CSV export via `lib/export-activity-csv.ts`. Capacity-overflow rejections become `allocation_overflow_attempt` rows. Logs are immutable (no UPDATE/DELETE policies). DB-trigger safety net deliberately deferred; schema reserves room. |
-| **Pilot Hardening (Week 1–2)** | Operational visibility & UX softening for real-world deployment | **Operational visibility**: `public.app_errors` (migration 021) captures caught exceptions; `lib/error-log.ts → reportError()` is fire-and-forget. Global `app/error.tsx` + `app/global-error.tsx` (Next 16 `unstable_retry`) + `components/ErrorBoundary.tsx` class wrapper. **Validation**: `validateDomainRecord` wired client (form) + server (mutations) with `formatDomainIssues` helper. **Soft delete** (migration 020): `deleted_at` + partial indexes on `agri_records` / `farmers` / `households` / `farmer_assets`; four delete mutations swap `.delete()` → `.update({ deleted_at })`; load queries filter `.is("deleted_at", null)`; defensive guard in `cropActiveAllocationHa`. Hard-delete preserved for configuration-like tables (subsidies, organizations). **Restore**: admin-only `app/admin/restore/page.tsx` (50 rows/table, single-click clear). **UX**: friendlier status labels ("Currently Growing", "Harvest Recorded", "Closed") + `RECORD_STATUS_LONG_LABELS`; shared `EmptyState` component; confirm-on-finalize before terminal status transitions; `lib/domain/warnings.ts` with `findDuplicateFarmer` (name + RSBSA) replacing inline duplicate guard; session-expiry banner on `LoginPage` (auth-context distinguishes intentional logout from token revocation). See §17 for the operational hardening overlay summary. |
+| **Pilot Hardening (Week 1–3)** | Operational visibility, UX softening & resilience for real-world deployment | **Visibility**: `public.app_errors` (migration 021) captures caught exceptions; `lib/error-log.ts → reportError()` is fire-and-forget. Global `app/error.tsx` + `app/global-error.tsx` (Next 16 `unstable_retry`) + `components/ErrorBoundary.tsx` class wrapper. **Validation**: `validateDomainRecord` wired client (form) + server (mutations) with `formatDomainIssues` helper. **Soft delete** (migration 020): `deleted_at` + partial indexes on `agri_records` / `farmers` / `households` / `farmer_assets`; four delete mutations swap `.delete()` → `.update({ deleted_at })`; load queries filter `.is("deleted_at", null)`. Hard-delete preserved for configuration-like tables (subsidies, organizations). **Restore**: admin-only `app/admin/restore/page.tsx`. **UX**: friendlier status labels ("Currently Growing", "Harvest Recorded", "Closed") + `RECORD_STATUS_LONG_LABELS`; shared `EmptyState`; confirm-on-finalize; `lib/domain/warnings.ts` with `findDuplicateFarmer` (name + RSBSA); session-expiry banner. **White-screen fix (Week 3)**: AuthProvider's session-restore IIFE now wraps every `await` in try/catch, enforces a 10s hard timeout, renders `<AuthLoadingSkeleton />` during loading (was `return null`), and surfaces a friendly `restoreError` banner. Per-provider `<ErrorBoundary>` wraps inside `components/providers.tsx` isolate AuthProvider from AgriDataProvider crashes. Hydration mismatch fixed in `app/page.tsx` (date computed in `useEffect`, not during render). `lib/debug.ts` adds a gated lifecycle logger. **Resilience (Week 3)**: `lib/activity-log.ts` retries once on failure and persists unrecovered rows to `localStorage` (50-entry cap, 24h TTL), flushed opportunistically on next success. `lib/contexts/load-status-context.tsx` exposes per-table load failures; `ProviderLoadBanner` surfaces them with a Retry button. **Operational docs (Week 3)**: `docs/BACKUP_RUNBOOK.md` + `docs/STAGING_SETUP.md`. See §17 for the operational hardening overlay summary. |
 
 ### Phase 5 sub-steps (provider refactor)
 
@@ -524,7 +526,7 @@ flowchart TD
 | 5 — Exports & investigation views | ✅ | `useActivityFeed(filter)` in the same context file. `lib/export-activity-csv.ts` (RFC-4180, UTF-8 BOM, 10,000-row cap). `components/dashboard/UserActivityPanel.tsx` — filters + paginated table + Export CSV. Mounted as an admin-only "Activity" tab in `app/page.tsx`. |
 | 6 — DB-trigger safety net | ⏸️ deferred | Schema reserves `source = 'db_trigger'` for a future BEFORE INSERT/UPDATE/DELETE trigger pack that would catch direct service-role SQL writes. Today's surface is fully covered by the app-side path; deferred to avoid trigger-bug risk vs. marginal coverage gain. |
 
-### Pilot Hardening sub-steps (Week 1–2)
+### Pilot Hardening sub-steps (Week 1–3)
 
 | Step | Done | Result |
 |---|---|---|
@@ -537,6 +539,10 @@ flowchart TD
 | W2.3 — Confirm-on-finalize | ✅ | `RecordFormDialog`: `submit()` extracted from `handleSubmit`; new `pendingTransitionKind()` detects edits where the new status is `harvested` / `damaged` / `archived` *and* differs from the prior status. Re-uses `ConfirmDialog` (non-danger styling) with distinct copy for "Finalize" vs "Close" transitions. Pre-Phase-2 rows without a stored prior status skip the prompt. |
 | W2.4 — Duplicate detection module | ✅ | `lib/domain/warnings.ts` defines `DataWarning` shape + `findDuplicateFarmer({ name, rsbsa, excludeId }, farmers)` with whitespace-normalized name match and RSBSA-number match (RSBSA precedence). `FarmerFormDialog` inline check refactored to use it; warning UI shows the full sentence ("A farmer named X is already registered..." or "RSBSA number already used by X...") and flips submit to "Add Anyway". |
 | W2.5 — Session expiry UX | ✅ | `lib/auth-context.tsx` `onAuthStateChange` distinguishes intentional logout (existing `logoutInProgressRef`) from unexpected `SIGNED_OUT` via a functional `setUser` setter; adds `sessionExpired` state + `clearSessionExpired()` to `AuthContextValue`. `login` clears the flag on success. `LoginPage` shows an amber "Your session expired. Please sign in again." banner above the form (suppressed if there's a normal login error to avoid double messaging). |
+| W3.0 — White-screen-on-reload fix | ✅ | Root cause: `AuthProvider` returned `null` while `loading=true`, with no try/catch around `getSession()` / `fetchProfile()`. Any throw (slow network, stale cookies, Supabase paused) or hang left `loading` true forever → permanent blank screen. Fix: per-step try/catch + 10s `AUTH_RESTORE_TIMEOUT_MS` hard ceiling + `<AuthLoadingSkeleton />` during loading + new `restoreError` banner on LoginPage. Per-provider `<ErrorBoundary>` wraps in `components/providers.tsx` so an AgriDataProvider crash doesn't unmount AuthProvider. Hydration mismatch fixed in `app/page.tsx` (date moved from render-time `new Date()` to `useState("") + useEffect`). New `lib/debug.ts` lifecycle logger gated on `NEXT_PUBLIC_DEBUG=1` or `localStorage['agro:debug']='1'`. Dev-only stack-trace block added to `app/error.tsx`, `app/global-error.tsx`, `ErrorBoundary.tsx`. |
+| W3.1 — Activity-log retry queue | ✅ | `lib/activity-log.ts`: one retry with 2s backoff on insert failure; on second failure, the row is queued to `localStorage` under `agro:activity-log-retry` (50-entry cap, FIFO eviction, 24h TTL). Next successful `logActivity` opportunistically flushes the queue (one shot per row; failures stay queued). Re-entrancy guard prevents concurrent flushes. New exports `getActivityLogRetryQueueSize()` and `flushActivityLogRetryQueue()` for an optional admin diagnostics view. Surface unchanged for callers. |
+| W3.2 — Provider-load error surface | ✅ | New `lib/contexts/load-status-context.tsx` with `AgriLoadStatusContext` and `useAgriLoadStatus()` hook (returns no-op default if called outside the tree). `AgriDataProvider` populates `loadErrors: Record<string, string>` per-table on each `Promise.all`; `retryCounter` state + `retryLoad()` callback re-runs the effect. `<AgriLoadStatusProvider>` wraps the four-context tree. New `components/dashboard/ProviderLoadBanner.tsx` is mounted at the top of the dashboard shell in `app/page.tsx`; shows "Some data failed to load. Affected: foo, bar +N more. [Retry] [×]" — session-scoped dismissal. |
+| W3.3 — Backup runbook + staging env | ✅ | `docs/BACKUP_RUNBOOK.md` covers Supabase Pro auto-backups, daily `pg_dump` schedule (crontab + cloud sync), 30-day retention, dry-run restore into Docker Postgres (run quarterly), real-recovery flow into a fresh Supabase project, migration rollback referencing `migrations/rollback/`, and an operational triage checklist. `docs/STAGING_SETUP.md` covers second-Supabase-project setup, full migration list (001..021), seeding via existing scripts, `.env.staging` file-swap pattern (no new deps), visual indicators to prevent prod-vs-staging confusion, promotion order (schema staging → prod, data never staging → prod). |
 
 ## 14) Key files (index)
 
@@ -556,6 +562,7 @@ flowchart TD
 - `lib/contexts/records-context.tsx` — `RecordsContext` + `useRecords()` (agri_records + record mutations)
 - `lib/contexts/metrics-context.tsx` — `MetricsContext` + `useMetrics()` (22 derived summaries; hook-fed via Phase E)
 - `lib/contexts/activity-context.tsx` — **Phase Next**: bare hooks `useActivityLog` (per-entity) + `useActivityFeed` (filterable). No Provider — lazy fetch only when consumed.
+- `lib/contexts/load-status-context.tsx` — **Pilot Hardening Week 3**: `AgriLoadStatusContext` + `useAgriLoadStatus()` for per-table load-failure surface. Wrapped around the four-context tree by AgriDataProvider.
 
 ### Domain (Phase 1–4 + Phase A + Phase Next)
 - `lib/domain/index.ts` — barrel
@@ -620,8 +627,16 @@ flowchart TD
 - `components/ui/DialogPortal.tsx`
 
 ### Error boundaries & empty states (Pilot Hardening)
-- `components/ErrorBoundary.tsx` — class-component wrapper for fragile sub-trees (`resetKey` prop, calls `reportError`)
+- `components/ErrorBoundary.tsx` — class-component wrapper for fragile sub-trees (`resetKey` prop, calls `reportError`; dev-only stack-trace block)
 - `components/ui/EmptyState.tsx` — shared empty-state surface (icon + title + description + primary/secondary action)
+- `components/dashboard/ProviderLoadBanner.tsx` — **Pilot Hardening Week 3**: top-bar banner for partial data-load failures, with Retry + Dismiss
+
+### Diagnostics & debug
+- `lib/debug.ts` — **Pilot Hardening Week 3**: gated lifecycle logger (`NEXT_PUBLIC_DEBUG=1` or `localStorage['agro:debug']='1'`). Helpers: `debug`, `warn`, `error`, `time`/`timeEnd`, `mount`, `transition`. No-op in production with neither flag set.
+
+### Operational runbooks (Pilot Hardening Week 3)
+- `docs/BACKUP_RUNBOOK.md` — daily `pg_dump`, dry-run restore, real-recovery flow, migration rollback, triage checklist
+- `docs/STAGING_SETUP.md` — second-Supabase-project workflow, full migration list, `.env.staging` file-swap pattern, prod-vs-staging guardrails
 
 ### Tests & scripts
 - `scripts/test-metrics.ts` — Phase 4 smoke tests (54 cases, all passing)
@@ -636,7 +651,10 @@ flowchart TD
 | Read the canonical domain spec | `Phase 1 Domain Model.md` |
 | Understand land asset allocation end-to-end | `Phase A Land Asset Allocation.md` |
 | Understand the activity / operational history subsystem | `Phase Next Activity Timeline.md` |
-| Understand the pilot hardening overlay (error visibility, soft delete, UX softening) | §13 Pilot Hardening sub-steps + §17 below |
+| Understand the pilot hardening overlay (error visibility, soft delete, UX softening, resilience) | §13 Pilot Hardening sub-steps + §17 below |
+| Recover from a data incident | `docs/BACKUP_RUNBOOK.md` (§6 operational recovery checklist) |
+| Set up staging for testing a migration | `docs/STAGING_SETUP.md` |
+| Toggle the debug logger | `localStorage.setItem('agro:debug', '1')` then reload — see `lib/debug.ts` |
 | Trace a metric back to source | `lib/domain/metrics.ts` + `scripts/test-metrics.ts` |
 | Add a new record type | start with `lib/data.ts:AgriRecord`, then `commodity.ts`, then `RecordFormDialog` |
 | Tighten validation | `lib/validations.ts` (form) + `lib/domain/validation.ts` (domain) + a migration in `migrations/` |
@@ -656,13 +674,14 @@ flowchart TD
 7. **`scripts/schema.sql` is incomplete** — bootstrapped only `farmers`/`households`/`agri_records`; missing `farmer_assets`, household_subsidies, commodity_group, Phase 2 `status`, and `agri_records` RLS. Anyone running it gets a DB that needs migrations 002–021 applied separately. Migration 018 documents and reconciles the diverged `farmer_assets` shape that this gap produced in one environment.
 8. **Activity-log DB-trigger safety net (Phase Next §6)** — deliberately not built. App-side covers all 24+ mutation sites today; the only remaining surface is direct service-role SQL writes (seed loads, retention pruning, admin one-offs), and logging those would clutter the audit table with maintenance noise. If automated server-side writes become routine, add a trigger pack tagged `source = 'db_trigger'` — schema already reserves room.
 9. **Activity-log retention pruning is manual** — `activity_logs` grows forever today. No auto-prune; documented manual cleanup query in migration 019's footer. If table size becomes a concern (year 3+), introduce a partition-by-month strategy without changing the API surface. The same applies to `app_errors` (migration 021 footer documents a 90-day cleanup template).
-10. **Pilot Hardening Week 3 not started** — operational resilience overlay still planned: activity-log retry queue (one-shot retry with `localStorage` fallback for `logActivity` failures), provider-load error surface (the 7-table `Promise.all` in `agri-context.tsx` currently logs and continues silently — should surface a reload banner), backup/snapshot runbook, staging environment separation. Documented in the pilot-readiness plan; not yet scheduled.
-11. **Anonymous error capture not supported** — `app_errors` RLS INSERT requires an authenticated caller (any barangay user can insert with their own barangay; admins can insert with NULL). Errors that fire pre-login (e.g. crash in `LoginPage` mount) are not captured. `console.error` still fires in those cases. Acceptable for pilot scale; revisit only if a measurable share of issues turn out to be pre-auth.
+10. **Mutation catch blocks don't yet call `reportError`** — `lib/error-log.ts → reportError()` ships and the error boundaries + admin restore page call it. The ~9 `console.error` sites inside `lib/agri-context.tsx` (mutation catch blocks) and the form dialogs still console-only. Wrapping them is the cheapest remaining visibility win — single-line additions next to each existing `console.error`. Originally a Week 3 backlog item; deferred to a Week 3+ cleanup pass.
+11. **Anonymous error capture not supported** — `app_errors` RLS INSERT requires an authenticated caller. Crashes that fire pre-login (e.g. inside `LoginPage` mount) are not captured. `console.error` still fires. Acceptable for pilot scale; revisit only if a measurable share of issues turn out to be pre-auth.
 12. **`next/middleware` deprecation** — Next 16 emits a dev warning that the `middleware` file convention is deprecated in favor of `proxy`. Not breaking at the moment. A future maintenance pass should rename `middleware.ts` → `proxy.ts` and update the layer's docs.
+13. **`AgriLoadStatusContext` is fifth context outside the orchestrator group** — `<AgriLoadStatusProvider>` wraps the four-context tree (FarmersProvider / ProgramsProvider / RecordsProvider / MetricsProvider) rather than slotting into one of them. Clean enough for pilot but adds one more layer of context nesting. If a future refactor consolidates the orchestrator's provider tree (see follow-up 2 about full state separation), the load-status surface can be folded in.
 
 ## 17) Pilot operational hardening overlay
 
-A focused operational maturity overlay shipped in Week 1–2 of pilot prep (May 2026). Distinct from the Phase 1–5 / A–D / Next architectural phases — this is a hardening sweep, not a new architectural axis. Preserves the existing architecture; surgically adds visibility, safety, and friendlier UX. The complete plan lives in `~/.claude/plans/i-need-help-preparing-synchronous-phoenix.md`.
+A focused operational maturity overlay shipped in Week 1–3 of pilot prep (May 2026). Distinct from the Phase 1–5 / A–D / Next architectural phases — this is a hardening sweep, not a new architectural axis. Preserves the existing architecture; surgically adds visibility, safety, friendlier UX, and resilience. The complete plan lives in `~/.claude/plans/i-need-help-preparing-synchronous-phoenix.md`.
 
 ### 17.1 Operational error visibility
 
@@ -733,7 +752,80 @@ Cross-references for items covered above:
 - **Confirm-on-finalize**: §10. `RecordFormDialog.submit()` is extracted so `ConfirmDialog` can call it after the user confirms a transition to `harvested` / `damaged` / `archived`.
 - **Duplicate farmer detection**: §3.7. `findDuplicateFarmer` in `lib/domain/warnings.ts` matches on case-insensitive normalized name + RSBSA number. Wired into `FarmerFormDialog` with a two-step "warning → Add Anyway" flow.
 
-### 17.5 What's intentionally NOT in pilot scope
+### 17.5 White-screen-on-reload resilience (Week 3)
+
+Root cause was `AuthProvider` returning `null` while `loading=true` with no try/catch around the `getSession()` / `fetchProfile()` IIFE. If either threw (slow network, stale cookies, paused Supabase, env miss) or hung, `setLoading(false)` never ran and the provider rendered nothing forever. The error boundary added in Week 1 didn't catch it because no error was thrown — just a permanent loading state.
+
+Fix surface in `lib/auth-context.tsx`:
+
+```ts
+// New: AUTH_RESTORE_TIMEOUT_MS = 10_000
+// New: restoreError state + clearRestoreError on AuthContextValue
+// IIFE wrapped in try/catch + per-step (getSession, fetchProfile) try/catch
+// finishLoading("ok" | "throw" | "timeout") helper
+// setTimeout fires finishLoading("timeout") after 10s if still loading
+// if (loading) return <AuthLoadingSkeleton />  // was: return null
+```
+
+`LoginPage` surfaces an amber `restoreError` banner (suppressed when there's a normal login error or `sessionExpired`). Per-provider `<ErrorBoundary label="AgriDataProvider">` in `components/providers.tsx` isolates a downstream crash from the auth tree so the user can still sign out / re-sign-in.
+
+Secondary hydration mismatch in `app/page.tsx` fixed: the `today` date was computed via `new Date().toLocaleDateString(...)` during render, producing different output on the server (server clock) vs client (browser clock) around Manila day boundaries. Moved to `useState("") + useEffect`.
+
+### 17.6 Activity-log retry queue (Week 3)
+
+`lib/activity-log.ts` previously made a single insert and surfaced a `console.warn` on failure; the row was lost. The activity_logs channel was best-effort by design (mutations succeed regardless), but on flaky networks the audit gap accumulated.
+
+Retry behavior:
+
+1. First insert attempt
+2. On failure, wait 2s and retry once
+3. If both fail, persist the row to `localStorage['agro:activity-log-retry']`
+4. The queue is capped at 50 entries (FIFO eviction on overflow) and entries are dropped after 24h (lazy TTL on read)
+5. Next time any `logActivity` call succeeds, opportunistically flush the queue (one shot per row; failures stay queued)
+6. Re-entrancy guard prevents two concurrent flushes from inserting duplicates
+
+Surface unchanged for callers — still `void logActivity(...)` in `agri-context.tsx`. New exports `getActivityLogRetryQueueSize()` and `flushActivityLogRetryQueue()` are wired for an optional admin diagnostics view later (no UI yet). Final `console.warn` fires only after the retry also fails, so console stays quiet on healthy retries.
+
+### 17.7 Provider-load error surface (Week 3)
+
+`AgriDataProvider`'s `Promise.all` over 7 tables previously logged any per-table failure silently to console — a partial load (one stale RLS policy, one paused project) looked identical to "no data yet" to the user.
+
+New flow:
+
+1. Per-table errors collected into `loadErrors: Record<string, string>` (key = table name, value = Postgres / network error message)
+2. State + `retryLoad()` callback exposed via new `lib/contexts/load-status-context.tsx` (sits outside the four split data contexts; none of them had a natural slot for ambient load state)
+3. `components/dashboard/ProviderLoadBanner.tsx` reads via `useAgriLoadStatus()` and renders an amber banner at the top of the dashboard shell — "Some data failed to load. Affected: <table list>. [Retry] [×]"
+4. Retry bumps a `retryCounter` that the load effect depends on, causing a fresh fetch. Effect cleanup cancels the previous in-flight Promise.all
+5. Banner is dismissible per SPA session; a fresh reload brings it back if errors persist
+
+When all 7 tables succeed, `loadErrors` is empty and the banner renders nothing — zero footprint in the happy path.
+
+### 17.8 Operational runbooks (Week 3)
+
+Pure documentation deliverables in `docs/`:
+
+- `BACKUP_RUNBOOK.md` covers the three backup channels (Supabase Pro auto-backup, daily `pg_dump` with cron + cloud sync, CSV export snapshots before each phase rollout) plus soft-delete preservation in-table. Includes a dry-run restore script using Docker Postgres (framed as a quarterly cadence — "a backup you've never restored is a story, not a backup"), real-recovery flow into a fresh Supabase project, migration rollback referencing `migrations/rollback/`, and an operational triage checklist.
+
+- `STAGING_SETUP.md` covers second-Supabase-project setup, full migration list (001..021) in order with notes on which are reconciliation-only, seeding via the existing `scripts/seed-supabase-bulk.ts` with staging credentials, an `.env.staging` file-swap pattern (no new dependencies like `cross-env` or `dotenv-cli`), visual indicators to prevent prod-vs-staging confusion, and a worked example of promoting a future migration through staging first.
+
+### 17.9 Diagnostics (Week 3)
+
+`lib/debug.ts` provides a gated client-side logger. Gating is dual:
+
+- `NEXT_PUBLIC_DEBUG=1` build-time env var (enabled for everyone in that build)
+- `localStorage.setItem('agro:debug', '1')` runtime toggle (per-browser, per-developer)
+
+Helpers:
+
+- `debug(label, ...args)` — namespaced `[agro]` console.log; no-op when disabled
+- `warn` / `error` — always fire (warnings shouldn't be silent)
+- `time(label)` / `timeEnd(label)` — performance timing
+- `mount(component, detail?)` — logs elapsed ms since module load; spots which mount is delaying first paint on a reload
+- `transition(scope, from, to, detail?)` — provider state transitions (e.g. `Auth: loading → ready`)
+
+Used by AuthProvider (mount, getSession lifecycle, finishLoading transitions) and AgriDataProvider (mount, per-load timing, partial-load warning, transition to ready). Adds <50ms to first paint when enabled, zero cost when disabled.
+
+### 17.10 What's intentionally NOT in pilot scope
 
 - **No Sentry / Datadog / external monitoring** — `app_errors` is the single channel for the pilot. Admins triage via Supabase Studio.
 - **No `app_errors` dashboard UI** — the activity-log feed UI is the obvious template if a need emerges; deferred.
