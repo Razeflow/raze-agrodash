@@ -19,6 +19,7 @@ import UserManagement from "@/components/dashboard/UserManagement";
 import ProgramsView from "@/components/dashboard/ProgramsView";
 import LandAllocation from "@/components/dashboard/LandAllocation";
 import UserActivityPanel from "@/components/dashboard/UserActivityPanel";
+import ProviderLoadBanner from "@/components/dashboard/ProviderLoadBanner";
 import { BARANGAYS } from "@/lib/data";
 import { sortBy } from "@/lib/sort";
 import {
@@ -274,6 +275,10 @@ export default function Page() {
 
       {/* ── Main Content ─────────────────────────────────────────────────── */}
       <div className="lg:pl-24 transition-all duration-500">
+        {/* Pilot Hardening (Week 3 item 12): visible "partial load failure"
+            banner above the dashboard header. No-op when all 7 tables
+            loaded cleanly. */}
+        <ProviderLoadBanner />
         {/* Hero Header */}
         <header className="px-10 pt-10 pb-6">
           <div className="flex justify-between items-end gap-4 flex-wrap">

@@ -53,6 +53,7 @@ import {
   type RecordsContextValue,
   type AddRecordResult,
 } from "@/lib/contexts/records-context";
+import { AgriLoadStatusProvider } from "@/lib/contexts/load-status-context";
 import { commodityGroupForCommodity } from "@/lib/domain/commodity";
 import { isHistoricalOnly } from "@/lib/domain/lifecycle";
 import { validateDomainRecord, formatDomainIssues } from "@/lib/domain/validation";
@@ -140,7 +141,13 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   const [farmerOrganizations, setFarmerOrganizations] = useState<FarmerOrganizationRow[]>([]);
   const [householdSubsidies, setHouseholdSubsidies] = useState<HouseholdSubsidy[]>([]);
   const [farmerAssets, setFarmerAssets] = useState<FarmerAsset[]>([]);
-  const [, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  // Pilot Hardening (Week 3 item 12): surface per-table load failures so the
+  // dashboard can show a "Some data failed to load. Retry" banner instead of
+  // silently rendering with empty arrays.
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
+  const [retryCounter, setRetryCounter] = useState(0);
+  const retryLoad = useCallback(() => setRetryCounter((c) => c + 1), []);
 
   const farmersRef = useRef<Farmer[]>(farmers);
   useEffect(() => { farmersRef.current = farmers; }, [farmers]);
@@ -167,8 +174,9 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   /* ── Load from Supabase on login ──────────────────────────────── */
+  // Depends on retryCounter so the user's [Retry] click re-runs this effect.
   useEffect(() => {
-    mount("AgriDataProvider", { isLoggedIn });
+    mount("AgriDataProvider", { isLoggedIn, retryCounter });
     if (!isLoggedIn) {
       setRecords([]);
       setFarmers([]);
@@ -177,9 +185,12 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       setFarmerOrganizations([]);
       setHouseholdSubsidies([]);
       setFarmerAssets([]);
+      setLoadErrors({});
       setLoaded(true);
       return;
     }
+    setLoaded(false);
+    setLoadErrors({});
 
     let cancelled = false;
     (async () => {
@@ -200,16 +211,31 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
         ]);
         if (cancelled) return;
 
-        const errs = [recordsRes, farmersRes, householdsRes, orgsRes, farmerOrgsRes, subsRes, assetsRes]
-          .map((r) => r.error)
-          .filter(Boolean);
-        if (errs.length > 0) {
+        // Build a per-table error map so the dashboard banner can surface
+        // which tables failed (and so a partial load doesn't look like
+        // "empty data"). Each entry's key is the table name; value is the
+        // Postgres / network error message.
+        const tableResults: Array<{ name: string; error: { message: string } | null }> = [
+          { name: "agri_records", error: recordsRes.error },
+          { name: "farmers", error: farmersRes.error },
+          { name: "households", error: householdsRes.error },
+          { name: "organizations", error: orgsRes.error },
+          { name: "farmer_organizations", error: farmerOrgsRes.error },
+          { name: "household_subsidies", error: subsRes.error },
+          { name: "farmer_assets", error: assetsRes.error },
+        ];
+        const newErrors: Record<string, string> = {};
+        for (const t of tableResults) {
+          if (t.error) newErrors[t.name] = t.error.message;
+        }
+        if (Object.keys(newErrors).length > 0) {
           // Surface every per-table error to the console so a partial load
           // (e.g. one RLS policy mismatch) is visible. Keep the defaults
           // (empty arrays) so the rest of the app still renders.
-          console.error("[AgriData] Supabase load errors:", errs);
-          warn("AgriData: partial load — some tables failed", { errorCount: errs.length });
+          console.error("[AgriData] Supabase load errors:", newErrors);
+          warn("AgriData: partial load — some tables failed", { errorCount: Object.keys(newErrors).length });
         }
+        setLoadErrors(newErrors);
 
         // Defensive: each setX call independently catches a normalize-time
         // throw so one bad row can't blank the entire provider. Each branch
@@ -248,10 +274,25 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
           records: recordsRes.data?.length ?? 0,
           farmers: farmersRes.data?.length ?? 0,
           households: householdsRes.data?.length ?? 0,
-          errors: errs.length,
+          errors: Object.keys(newErrors).length,
         });
       } catch (err) {
-        if (!cancelled) console.error("[AgriData] Supabase load error:", err);
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[AgriData] Supabase load error:", err);
+          // Network error / throw: mark all seven tables as failed so the
+          // user sees the banner. The retry button will run the full
+          // Promise.all again.
+          setLoadErrors({
+            agri_records: msg,
+            farmers: msg,
+            households: msg,
+            organizations: msg,
+            farmer_organizations: msg,
+            household_subsidies: msg,
+            farmer_assets: msg,
+          });
+        }
       } finally {
         timeEnd("AgriData.load");
         if (!cancelled) setLoaded(true);
@@ -261,7 +302,7 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn]);
+  }, [isLoggedIn, retryCounter]);
 
   /* ── Memoised visible slices ──────────────────────────────────── */
 
@@ -1278,14 +1319,24 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     deleteRecord,
   };
 
+  // Load status (Pilot Hardening Week 3 item 12) is exposed via its own
+  // lightweight context outside the four domain providers — none of them
+  // had a natural slot for ambient "load failed" state.
+  const loadStatusValue = useMemo(
+    () => ({ loadErrors, loading: !loaded, retryLoad }),
+    [loadErrors, loaded, retryLoad],
+  );
+
   return (
-    <FarmersProvider value={farmersValue}>
-      <ProgramsProvider value={programsValue}>
-        <RecordsProvider value={recordsValue}>
-          <MetricsProvider>{children}</MetricsProvider>
-        </RecordsProvider>
-      </ProgramsProvider>
-    </FarmersProvider>
+    <AgriLoadStatusProvider value={loadStatusValue}>
+      <FarmersProvider value={farmersValue}>
+        <ProgramsProvider value={programsValue}>
+          <RecordsProvider value={recordsValue}>
+            <MetricsProvider>{children}</MetricsProvider>
+          </RecordsProvider>
+        </ProgramsProvider>
+      </FarmersProvider>
+    </AgriLoadStatusProvider>
   );
 }
 
