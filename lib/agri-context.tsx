@@ -87,6 +87,7 @@ import { useAuth } from "./auth-context";
 import { supabase } from "./supabase/client";
 import { debug, mount, time, timeEnd, transition, warn } from "@/lib/debug";
 import { friendlyDbError } from "./supabase/errors";
+import { updateWithConcurrency } from "./concurrency";
 import { sortBy } from "./sort";
 import { fullNameSortKey, lastNameSortKey } from "./name";
 import { agriRecordInsertRow, farmerInsertRow } from "./insert-rows";
@@ -556,13 +557,23 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       centroid_lng: number | null;
     }>,
   ): Promise<MutationResult> {
-    const now = new Date().toISOString();
     const existing = farmerAssetsRef.current.find((x) => x.id === id);
-    const { error } = await supabase
-      .from("farmer_assets")
-      .update({ ...patch, updated_at: now })
-      .eq("id", id);
-    if (error) return { ok: false, message: error.message };
+    if (!existing) {
+      return { ok: false, message: "Asset not found. Please reload and try again." };
+    }
+    // Week 3.5 Part 1: optimistic concurrency via lib/concurrency.ts (see
+    // migration 022). Helper issues UPDATE ... WHERE id=$1 AND updated_at=$2.
+    // The BEFORE-UPDATE trigger guarantees the server bumps updated_at on
+    // every write, so a stale client write returns 0 rows → "stale" result.
+    const res = await updateWithConcurrency<{ updated_at: string }>({
+      table: "farmer_assets",
+      id,
+      lastKnownUpdatedAt: existing.updated_at,
+      payload: patch,
+      entityLabel: "asset",
+    });
+    if (!res.ok) return { ok: false, message: res.message };
+    const now = String(res.row.updated_at);
     setFarmerAssets((prev) =>
       prev.map((x) => (x.id === id ? { ...x, ...patch, updated_at: now } : x)),
     );
@@ -754,6 +765,9 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
     const now = new Date().toISOString();
     const payload = { ...data, ...ff, farmer_ids: data.farmer_ids || [] };
     const existing = recordsRef.current.find((r) => r.id === id);
+    if (!existing) {
+      return { ok: false, message: "Record not found. Please reload and try again." };
+    }
     const merged = ({ ...(existing ?? {}), ...payload, id, updated_at: now } as AgriRecord);
     merged.commodity_group = merged.commodity_group ?? commodityGroupForCommodity(merged.commodity);
     // Server-side domain enforcement (see addRecord for rationale).
@@ -786,12 +800,17 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
       if (landCheck.kind === "capacity") logAssetOverflowAttempt(merged, landCheck);
       return { ok: false, message: landCheck.message };
     }
-    const { error } = await supabase
-      .from("agri_records")
-      .update(agriRecordInsertRow(merged))
-      .eq("id", id);
-    if (error) return { ok: false, message: friendlyDbError(error) };
-    setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...payload, updated_at: now } : r)));
+    // Week 3.5 Part 1: optimistic concurrency (see migration 022).
+    const res = await updateWithConcurrency<{ updated_at: string }>({
+      table: "agri_records",
+      id,
+      lastKnownUpdatedAt: existing.updated_at,
+      payload: agriRecordInsertRow(merged),
+      entityLabel: "record",
+    });
+    if (!res.ok) return { ok: false, message: res.message };
+    const serverUpdatedAt = String(res.row.updated_at);
+    setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...payload, updated_at: serverUpdatedAt } : r)));
     // Phase Next: activity log. Resolve the semantic action from the diff, and
     // skip the log entirely when nothing meaningful changed (the helper
     // short-circuits on an empty diff).
@@ -872,13 +891,20 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function updateHousehold(id: string, h: Partial<Omit<Household, "id" | "created_at" | "updated_at">>): Promise<MutationResult> {
-    const now = new Date().toISOString();
     const existing = householdsRef.current.find((x) => x.id === id);
-    const { error } = await supabase
-      .from("households")
-      .update({ ...h, updated_at: now })
-      .eq("id", id);
-    if (error) return { ok: false, message: error.message };
+    if (!existing) {
+      return { ok: false, message: "Household not found. Please reload and try again." };
+    }
+    // Week 3.5 Part 1: optimistic concurrency (see migration 022).
+    const res = await updateWithConcurrency<{ updated_at: string }>({
+      table: "households",
+      id,
+      lastKnownUpdatedAt: existing.updated_at,
+      payload: h,
+      entityLabel: "household",
+    });
+    if (!res.ok) return { ok: false, message: res.message };
+    const now = String(res.row.updated_at);
     setHouseholds((prev) => prev.map((x) => (x.id === id ? { ...x, ...h, updated_at: now } : x)));
     if (existing) {
       const merged: Household = { ...existing, ...h, updated_at: now } as Household;
@@ -1151,13 +1177,24 @@ export function AgriDataProvider({ children }: { children: ReactNode }) {
   }
 
   async function updateFarmer(id: string, data: Omit<Farmer, "id" | "created_at" | "updated_at">): Promise<MutationResult> {
-    const iso = new Date().toISOString();
     const existing = farmersRef.current.find((f) => f.id === id);
-    const { error } = await supabase
-      .from("farmers")
-      .update({ ...data, updated_at: iso })
-      .eq("id", id);
-    if (error) return { ok: false, message: friendlyDbError(error) };
+    if (!existing) {
+      return { ok: false, message: "Farmer not found. Please reload and try again." };
+    }
+    // Week 3.5 Part 1: optimistic concurrency on the primary row (see migration
+    // 022). The denormalized-field sync loop below issues secondary UPDATEs on
+    // agri_records — those stay best-effort, but the trigger still bumps
+    // agri_records.updated_at so any concurrent record-editor will hit a
+    // stale-write on their next save rather than silently overwriting us.
+    const res = await updateWithConcurrency<{ updated_at: string }>({
+      table: "farmers",
+      id,
+      lastKnownUpdatedAt: existing.updated_at,
+      payload: data,
+      entityLabel: "farmer",
+    });
+    if (!res.ok) return { ok: false, message: res.message };
+    const iso = String(res.row.updated_at);
 
     const updatedFarmers = farmersRef.current.map((f) =>
       f.id === id ? { ...f, ...data, updated_at: iso } : f,
