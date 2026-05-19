@@ -11,6 +11,7 @@ import {
 } from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import { useBeforeUnloadWarning } from "@/hooks/useDirtyForm";
 import DialogPortal from "@/components/ui/DialogPortal";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
@@ -80,6 +81,9 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
   const [editDraft, setEditDraft] = useState<Draft | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [deleteAssetId, setDeleteAssetId] = useState<string | null>(null);
+  // Week 3.5 Part 8: declared above the useEffect so the close branch
+  // can reset it without a TDZ violation — dirty/safeClose logic below.
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   const assets = useMemo(
     () => (farmer ? getAssetsForFarmer(farmer.id) : []),
@@ -92,8 +96,36 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
       setEditingId(null);
       setEditDraft(null);
       setErrorMsg(null);
+    } else {
+      setShowDiscardConfirm(false);
     }
   }, [open, farmer]);
+
+  // Week 3.5 Part 8: dirty + safeClose. No parent form to compare, so
+  // dirty is "user is mid-editing an asset line OR has typed into the
+  // new-asset draft". useBeforeUnloadWarning still catches tab close.
+  // All hooks below MUST run on every render — placed BEFORE the early
+  // `if (!mounted || !farmer)` return. (showDiscardConfirm is declared
+  // higher up so the open/close useEffect can reset it.)
+  const dirty =
+    editingId !== null ||
+    newItem.category !== "planting_area" ||
+    newItem.sub_category.trim() !== "" ||
+    newItem.product_detail.trim() !== "" ||
+    newItem.quantity.trim() !== "" ||
+    newItem.unit.trim() !== "" ||
+    newItem.area_hectares.trim() !== "" ||
+    newItem.acquired_date !== "" ||
+    newItem.notes.trim() !== "" ||
+    newItem.parcel_label.trim() !== "";
+  useBeforeUnloadWarning(dirty && open);
+  function safeClose() {
+    if (dirty) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    onClose();
+  }
 
   if (!mounted || !farmer) return null;
   const f = farmer;
@@ -300,14 +332,14 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
     <>
       <DialogPortal>
         <div className="fixed inset-0 lg:left-24 z-[65] overflow-y-auto">
-          <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+          <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={safeClose} />
           <div className="flex min-h-full items-center justify-center p-4">
             <div
               className={`relative z-10 w-full max-w-lg max-h-[min(92vh,900px)] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
             >
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-800">Farmer assets</h2>
-              <button type="button" onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
+              <button type="button" onClick={safeClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
                 <X size={18} className="text-gray-400" />
               </button>
             </div>
@@ -399,7 +431,7 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
             <div className="flex justify-end gap-3 pt-5">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={safeClose}
                 className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition"
               >
                 Close
@@ -426,6 +458,20 @@ export default function FarmerAssetsDialog({ open, onClose, farmer }: Props) {
             return false;
           }
         }}
+      />
+
+      <ConfirmDialog
+        open={showDiscardConfirm}
+        danger={false}
+        title="Discard unsaved changes?"
+        description="You've made changes that haven't been saved. Continue editing or discard?"
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={async () => {
+          setShowDiscardConfirm(false);
+          onClose();
+        }}
+        onClose={() => setShowDiscardConfirm(false)}
       />
     </>
   );

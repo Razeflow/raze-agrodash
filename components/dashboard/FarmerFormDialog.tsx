@@ -1,12 +1,14 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { X, CheckCircle2, AlertTriangle, Camera } from "lucide-react";
 import type { Farmer } from "@/lib/data";
 import { BARANGAYS, CIVIL_STATUS_OPTIONS, ORG_TYPE_LABELS } from "@/lib/data";
 import { useAgriData, type AddFarmerInput } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import { useDirtyForm, useBeforeUnloadWarning } from "@/hooks/useDirtyForm";
 import DialogPortal from "@/components/ui/DialogPortal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { uploadFarmerPhoto } from "@/lib/farmer-photo";
 import { farmerFormSchema, zodIssuesToErrors } from "@/lib/validations";
 import { sortBy } from "@/lib/sort";
@@ -19,6 +21,25 @@ type Props = {
   mode: "add" | "edit";
   initialData?: Farmer;
   defaultBarangay?: string;
+};
+
+// Week 3.5 Part 8: snapshot shape for dirty-form detection. Includes every
+// useState that the dialog seeds in its open-time useEffect. photoFile is
+// tracked separately because File objects don't survive JSON.stringify.
+type FarmerFormSnapshot = {
+  lastName: string;
+  firstName: string;
+  middleName: string;
+  gender: "Male" | "Female";
+  barangay: string;
+  householdId: string;
+  rsbsaNumber: string;
+  birthDate: string;
+  civilStatus: string;
+  photoUrl: string | null;
+  selectedOrgIds: string[];
+  isHouseholdHead: boolean;
+  newHouseholdName: string;
 };
 
 export default function FarmerFormDialog({ open, onClose, mode, initialData, defaultBarangay }: Props) {
@@ -79,40 +100,87 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
       setForceAdd(false);
       setPhotoFile(null);
       setFieldErrors({});
+      let seed: FarmerFormSnapshot;
       if (mode === "edit" && initialData) {
         const split = splitHumanName(initialData.name);
         const fm = split.firstMiddle.trim();
         const fmParts = fm ? fm.split(" ") : [];
-        setLastName(split.last);
-        setFirstName(fmParts[0] || "");
-        setMiddleName(fmParts.slice(1).join(" "));
-        setGender(initialData.gender);
-        setBarangay(initialData.barangay);
-        setHouseholdId(initialData.household_id || "");
-        setRsbsaNumber(initialData.rsbsa_number || "");
-        setBirthDate(initialData.birth_date || "");
-        setCivilStatus(initialData.civil_status || "");
-        setPhotoUrl(initialData.photo_url);
-        setSelectedOrgIds(getOrganizationIdsForFarmer(initialData.id));
-        setIsHouseholdHead(initialData.is_household_head);
-        setNewHouseholdName("");
+        seed = {
+          lastName: split.last,
+          firstName: fmParts[0] || "",
+          middleName: fmParts.slice(1).join(" "),
+          gender: initialData.gender,
+          barangay: initialData.barangay,
+          householdId: initialData.household_id || "",
+          rsbsaNumber: initialData.rsbsa_number || "",
+          birthDate: initialData.birth_date || "",
+          civilStatus: initialData.civil_status || "",
+          photoUrl: initialData.photo_url,
+          selectedOrgIds: getOrganizationIdsForFarmer(initialData.id),
+          isHouseholdHead: initialData.is_household_head,
+          newHouseholdName: "",
+        };
       } else {
-        setLastName("");
-        setFirstName("");
-        setMiddleName("");
-        setGender("Male");
-        setBarangay(defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]));
-        setHouseholdId("");
-        setRsbsaNumber("");
-        setBirthDate("");
-        setCivilStatus("");
-        setPhotoUrl(null);
-        setSelectedOrgIds([]);
-        setNewHouseholdName("");
-        setIsHouseholdHead(true);
+        seed = {
+          lastName: "",
+          firstName: "",
+          middleName: "",
+          gender: "Male",
+          barangay: defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]),
+          householdId: "",
+          rsbsaNumber: "",
+          birthDate: "",
+          civilStatus: "",
+          photoUrl: null,
+          selectedOrgIds: [],
+          isHouseholdHead: true,
+          newHouseholdName: "",
+        };
       }
+      setLastName(seed.lastName);
+      setFirstName(seed.firstName);
+      setMiddleName(seed.middleName);
+      setGender(seed.gender);
+      setBarangay(seed.barangay);
+      setHouseholdId(seed.householdId);
+      setRsbsaNumber(seed.rsbsaNumber);
+      setBirthDate(seed.birthDate);
+      setCivilStatus(seed.civilStatus);
+      setPhotoUrl(seed.photoUrl);
+      setSelectedOrgIds(seed.selectedOrgIds);
+      setIsHouseholdHead(seed.isHouseholdHead);
+      setNewHouseholdName(seed.newHouseholdName);
+      initialFormRef.current = seed;
+    } else {
+      initialFormRef.current = null;
+      setShowDiscardConfirm(false);
     }
   }, [open, mode, initialData, defaultBarangay, isBarangayUser, userBarangay, getOrganizationIdsForFarmer]);
+
+  // Week 3.5 Part 8: unsaved-changes guard. All hooks must run on every
+  // render — placed BEFORE the `if (!mounted) return null` guard below.
+  const initialFormRef = useRef<FarmerFormSnapshot | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  const currentSnapshot = useMemo<FarmerFormSnapshot>(
+    () => ({
+      lastName, firstName, middleName, gender, barangay, householdId,
+      rsbsaNumber, birthDate, civilStatus, photoUrl, selectedOrgIds,
+      isHouseholdHead, newHouseholdName,
+    }),
+    [lastName, firstName, middleName, gender, barangay, householdId,
+     rsbsaNumber, birthDate, civilStatus, photoUrl, selectedOrgIds,
+     isHouseholdHead, newHouseholdName],
+  );
+  // Dirty if either the snapshot changed OR a photo file is pending upload.
+  const dirty = useDirtyForm(initialFormRef.current, currentSnapshot) || photoFile !== null;
+  useBeforeUnloadWarning(dirty && open && !saving);
+  function safeClose() {
+    if (dirty && !saving) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    onClose();
+  }
 
   if (!mounted) return null;
 
@@ -256,6 +324,25 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
       setNewHouseholdName("");
       setIsHouseholdHead(true);
       setSelectedOrgIds([]);
+      // Week 3.5 Part 8: re-baseline the dirty snapshot so the post-add
+      // reset state isn't flagged as unsaved. gender + barangay aren't
+      // reset by the form (intentional UX — user keeps them for next
+      // entry), so include their current values rather than seed defaults.
+      initialFormRef.current = {
+        lastName: "",
+        firstName: "",
+        middleName: "",
+        gender,
+        barangay,
+        householdId: "",
+        rsbsaNumber: "",
+        birthDate: "",
+        civilStatus: "",
+        photoUrl: null,
+        selectedOrgIds: [],
+        isHouseholdHead: true,
+        newHouseholdName: "",
+      };
       setTimeout(() => setSuccessMsg(null), 1500);
     } catch (err) {
       console.error("[FarmerForm] add error", err);
@@ -275,9 +362,10 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
   const errTextCls = "text-[11px] text-red-500 mt-1 flex items-center gap-1";
 
   return (
+    <>
     <DialogPortal>
       <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
-        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={safeClose} />
         <div className="flex min-h-full items-center justify-center p-4">
           <div
             className={`relative z-10 w-full max-w-2xl max-h-[92vh] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-5 sm:p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
@@ -286,7 +374,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
               <h2 className="text-lg font-bold text-gray-800">
                 {mode === "add" ? "Register Farmer" : "Edit Farmer"}
               </h2>
-              <button type="button" onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
+              <button type="button" onClick={safeClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
                 <X size={18} className="text-gray-400" />
               </button>
             </div>
@@ -586,7 +674,7 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
               <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={safeClose}
                   className="w-full sm:w-auto rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-white/70 transition"
                 >
                   {mode === "add" ? "Close" : "Cancel"}
@@ -606,5 +694,20 @@ export default function FarmerFormDialog({ open, onClose, mode, initialData, def
         </div>
       </div>
     </DialogPortal>
+
+    <ConfirmDialog
+      open={showDiscardConfirm}
+      danger={false}
+      title="Discard unsaved changes?"
+      description="You've made changes that haven't been saved. Continue editing or discard?"
+      confirmLabel="Discard"
+      cancelLabel="Keep editing"
+      onConfirm={async () => {
+        setShowDiscardConfirm(false);
+        onClose();
+      }}
+      onClose={() => setShowDiscardConfirm(false)}
+    />
+    </>
   );
 }

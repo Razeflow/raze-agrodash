@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Users, CheckCircle2, AlertCircle, History, FileText } from "lucide-react";
 import type { AgriRecord } from "@/lib/data";
 import {
@@ -18,6 +18,7 @@ import {
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import { useDirtyForm, useBeforeUnloadWarning } from "@/hooks/useDirtyForm";
 import DialogPortal from "@/components/ui/DialogPortal";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import FarmerSelectDialog from "./FarmerSelectDialog";
@@ -144,6 +145,11 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
   const [confirmFinalize, setConfirmFinalize] = useState<"finalize" | "archive" | null>(null);
   // Phase Next: which tab is active. Only "timeline" is reachable in edit mode.
   const [activeTab, setActiveTab] = useState<"details" | "timeline">("details");
+  // Week 3.5 Part 8: unsaved-changes guard. The snapshot is captured
+  // inside the seed useEffect alongside setForm, so it's exactly the
+  // shape the form was loaded with — no race with React batching.
+  const initialFormRef = useRef<RecordFormInput | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -153,8 +159,9 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
       setSubmitted(false);
       // Always land on Details when the dialog (re)opens.
       setActiveTab("details");
+      let seed: RecordFormInput;
       if (mode === "edit" && initialData) {
-        setForm({
+        seed = {
           barangay: initialData.barangay,
           commodity: initialData.commodity,
           sub_category: initialData.sub_category,
@@ -178,13 +185,33 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           lifecycle_status: initialData.lifecycle_status ?? "planted",
           status: recordStatus(initialData as any),
           farmer_asset_id: initialData.farmer_asset_id ?? null,
-        });
+        };
       } else {
         const empty = getEmptyForm();
-        setForm({ ...empty, barangay: defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]) });
+        seed = { ...empty, barangay: defaultBarangay || (isBarangayUser && userBarangay ? userBarangay : BARANGAYS[0]) };
       }
+      setForm(seed);
+      initialFormRef.current = seed;
+    } else {
+      initialFormRef.current = null;
+      setShowDiscardConfirm(false);
     }
   }, [open, mode, initialData, defaultBarangay, isBarangayUser, userBarangay]);
+
+  // Week 3.5 Part 8: dirty detection + browser-level leave guard +
+  // safeClose() wrapper that intercepts user-initiated close attempts
+  // (backdrop / X / Cancel) when the form has unsaved changes.
+  // Programmatic close from inside handleSubmit on success still calls
+  // onClose() directly (intentional — the form has been saved).
+  const dirty = useDirtyForm(initialFormRef.current, form);
+  useBeforeUnloadWarning(dirty && open && !saving);
+  function safeClose() {
+    if (dirty && !saving) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    onClose();
+  }
 
   // The status that's currently *saved* (used to gate which transitions the dropdown
   // offers). For edit mode it's the row's stored status; for add mode there's no
@@ -421,7 +448,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
     <>
       <DialogPortal>
       <div className="fixed inset-0 lg:left-24 z-50 overflow-y-auto">
-        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+        <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={safeClose} />
         <div className="flex min-h-full items-center justify-center p-4">
         <div className={`relative z-10 w-full max-w-2xl rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 max-h-[92vh] overflow-y-auto p-5 sm:p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}>
           <div className="mb-5 flex items-center justify-between">
@@ -430,7 +457,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
             </h2>
             <div className="flex items-center gap-2">
               <StatusBadge status={form.status as RecordStatus} />
-              <button onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
+              <button onClick={safeClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
                 <X size={18} className="text-gray-400" />
               </button>
             </div>
@@ -808,7 +835,7 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
 
             {/* Actions */}
             <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
-              <button type="button" onClick={onClose} className="w-full sm:w-auto rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-white/70 transition">{mode === "add" ? "Close" : "Cancel"}</button>
+              <button type="button" onClick={safeClose} className="w-full sm:w-auto rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2.5 sm:py-2 text-sm text-gray-600 hover:bg-white/70 transition">{mode === "add" ? "Close" : "Cancel"}</button>
               {!archived ? (
                 <button type="submit" disabled={saving} className={`w-full sm:w-auto rounded-[1.5rem] px-5 py-2.5 sm:py-2 text-sm font-black text-white shadow-lg transition ${saving ? "bg-slate-400 cursor-not-allowed shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"}`}>
                   {saving ? "Saving…" : mode === "add" ? "Add Record" : "Save Changes"}
@@ -851,6 +878,20 @@ export default function RecordFormDialog({ open, onClose, mode, initialData, def
           await submit();
         }}
         onClose={() => setConfirmFinalize(null)}
+      />
+
+      <ConfirmDialog
+        open={showDiscardConfirm}
+        danger={false}
+        title="Discard unsaved changes?"
+        description="You've made changes that haven't been saved. Continue editing or discard?"
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={async () => {
+          setShowDiscardConfirm(false);
+          onClose();
+        }}
+        onClose={() => setShowDiscardConfirm(false)}
       />
     </>
   );

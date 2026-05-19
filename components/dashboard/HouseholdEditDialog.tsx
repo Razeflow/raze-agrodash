@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import type { Household, HouseholdSubsidy, SubsidyCategory } from "@/lib/data";
 import { ORG_TYPE_LABELS, SUBSIDY_CATEGORIES, SUBSIDY_CATEGORY_LABELS, formatHouseholdSubsidySummary } from "@/lib/data";
 import { useAgriData } from "@/lib/agri-context";
 import { useAuth } from "@/lib/auth-context";
 import { useAnimatedMount } from "@/hooks/useAnimatedMount";
+import { useDirtyForm, useBeforeUnloadWarning } from "@/hooks/useDirtyForm";
 import DialogPortal from "@/components/ui/DialogPortal";
 import { sortBy } from "@/lib/sort";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -15,6 +16,17 @@ type Props = {
   open: boolean;
   onClose: () => void;
   household: Household | null;
+};
+
+// Week 3.5 Part 8: snapshot for the dialog's main form. Subsidy lines
+// are tracked separately via a "subsidyDirty" boolean (mid-edit or
+// drafted new line) because they save immediately and aren't part of
+// the parent form's commit.
+type HouseholdFormSnapshot = {
+  displayName: string;
+  farmingHa: number;
+  notes: string;
+  orgId: string;
 };
 
 const emptyNew = (): {
@@ -59,6 +71,11 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [deleteSubsidyId, setDeleteSubsidyId] = useState<string | null>(null);
   const [deleteHouseholdOpen, setDeleteHouseholdOpen] = useState(false);
+  // Week 3.5 Part 8: declared above the useEffect so the close branch
+  // can reset them without tripping "Cannot access variable before it is
+  // declared" — the dirty/safeClose logic that uses them lives below.
+  const initialFormRef = useRef<HouseholdFormSnapshot | null>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
   const subsidies = useMemo(
     () => (household ? getSubsidiesForHousehold(household.id) : []),
@@ -67,25 +84,77 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
 
   useEffect(() => {
     if (open && household) {
-      setDisplayName(household.display_name);
-      setFarmingHa(household.farming_area_hectares ?? 0);
-      setNotes(household.rffa_subsidies_notes ?? "");
-      setOrgId(household.organization_id || "");
+      const seed: HouseholdFormSnapshot = {
+        displayName: household.display_name,
+        farmingHa: household.farming_area_hectares ?? 0,
+        notes: household.rffa_subsidies_notes ?? "",
+        orgId: household.organization_id || "",
+      };
+      setDisplayName(seed.displayName);
+      setFarmingHa(seed.farmingHa);
+      setNotes(seed.notes);
+      setOrgId(seed.orgId);
       setNewItem(emptyNew());
       setEditingId(null);
       setEditDraft(null);
       setErrorMsg(null);
+      initialFormRef.current = seed;
+    } else if (!open) {
+      initialFormRef.current = null;
+      setShowDiscardConfirm(false);
     }
   }, [open, household]);
+
+  // Week 3.5 Part 8: dirty + safeClose. All hooks below MUST run on
+  // every render — placed BEFORE the early `if (!mounted || !household)`
+  // return so React's hook-call-count stays stable across renders.
+  // initialFormRef + showDiscardConfirm are declared higher up (above the
+  // useEffect) so the close branch can reset them.
+  const currentMainSnapshot = useMemo<HouseholdFormSnapshot>(
+    () => ({ displayName, farmingHa, notes, orgId }),
+    [displayName, farmingHa, notes, orgId],
+  );
+  // initialFormRef.current is set inside useEffect (after seed) and cleared
+  // on close — never mutated during render. Reading it here is safe; the
+  // value is stable within a single open cycle, and useDirtyForm's useMemo
+  // re-runs only when one of its deps actually changes.
+  // eslint-disable-next-line react-hooks/refs
+  const mainDirty = useDirtyForm(initialFormRef.current, currentMainSnapshot);
+  // Subsidies save immediately, but a mid-edit or partially-drafted
+  // new line is unsaved work worth warning about.
+  const subsidyDirty =
+    editingId !== null ||
+    newItem.product_detail.trim() !== "" ||
+    newItem.quantity.trim() !== "" ||
+    newItem.unit.trim() !== "" ||
+    newItem.amount_php.trim() !== "" ||
+    newItem.program_source.trim() !== "" ||
+    newItem.received_date !== "" ||
+    newItem.notes.trim() !== "";
+  const dirty = mainDirty || subsidyDirty;
+  useBeforeUnloadWarning(dirty && open);
+  function safeClose() {
+    if (dirty) {
+      setShowDiscardConfirm(true);
+      return;
+    }
+    onClose();
+  }
+
+  // Pre-existing rules-of-hooks fix surfaced by adding hooks above the
+  // early return: the useMemo was being called conditionally (only after
+  // mounted && household became true), so React saw the hook count change
+  // mid-component-life. Moving it above the early return + guarding for
+  // null household makes the call order stable across renders.
+  const orgsInBarangay = useMemo(() => {
+    if (!household) return [];
+    const scoped = organizations.filter((o) => !o.barangay || o.barangay === household.barangay);
+    return sortBy(scoped, (o) => o.name);
+  }, [organizations, household]);
 
   if (!mounted || !household) return null;
 
   const hh = household;
-
-  const orgsInBarangay = useMemo(() => {
-    const scoped = organizations.filter((o) => !o.barangay || o.barangay === hh.barangay);
-    return sortBy(scoped, (o) => o.name);
-  }, [organizations, hh.barangay]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -219,14 +288,14 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
     <>
       <DialogPortal>
         <div className="fixed inset-0 lg:left-24 z-[65] overflow-y-auto">
-          <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={onClose} />
+          <div className={`fixed inset-0 dialog-overlay ${visible ? "dialog-overlay-visible" : ""}`} onClick={safeClose} />
           <div className="flex min-h-full items-center justify-center p-4">
             <div
               className={`relative z-10 w-full max-w-lg max-h-[min(92vh,900px)] overflow-y-auto rounded-[2rem] bg-white/92 backdrop-blur-xl border border-white/40 p-8 shadow-2xl dialog-panel ${visible ? "dialog-panel-visible" : ""}`}
             >
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-bold text-gray-800">Edit household and subsidies</h2>
-              <button type="button" onClick={onClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
+              <button type="button" onClick={safeClose} className="rounded-2xl p-1 hover:bg-slate-100 transition">
                 <X size={18} className="text-gray-400" />
               </button>
             </div>
@@ -364,7 +433,7 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
                 )}
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={safeClose}
                   className="rounded-[1.5rem] border border-white/40 bg-white/50 px-4 py-2 text-sm text-gray-600 hover:bg-white/70 transition"
                 >
                   Cancel
@@ -414,6 +483,20 @@ export default function HouseholdEditDialog({ open, onClose, household }: Props)
           setDeleteHouseholdOpen(false);
           onClose();
         }}
+      />
+
+      <ConfirmDialog
+        open={showDiscardConfirm}
+        danger={false}
+        title="Discard unsaved changes?"
+        description="You've made changes that haven't been saved. Continue editing or discard?"
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={async () => {
+          setShowDiscardConfirm(false);
+          onClose();
+        }}
+        onClose={() => setShowDiscardConfirm(false)}
       />
     </>
   );
