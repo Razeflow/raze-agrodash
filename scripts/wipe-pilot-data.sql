@@ -1,112 +1,154 @@
 -- =========================================================================
--- Pre-pilot full data wipe.
+-- Pre-pilot full data wipe (aggressive version).
 -- =========================================================================
 --
--- Removes ALL entity data (records, farmers, households, assets, memberships,
--- subsidies) so the pilot user starts with an empty registry. Keeps:
+-- Removes EVERYTHING in the public schema so the pilot starts truly fresh.
+-- Audit history and organizations included — the user signalled all of it
+-- is mock and they want a clean slate before importing real RSBSA data.
 --
---   - public.organizations  — coops/associations reusable across pilot
---   - public.profiles       — pilot users need to log in
---   - auth.users            — same
---   - public.activity_logs  — append-only audit history (orphaned but useful)
---   - public.app_errors     — append-only error history
+-- WIPED (10 tables):
+--   - public.agri_records          — planting/harvest rows
+--   - public.farmer_organizations  — farmer ↔ org memberships
+--   - public.household_subsidies   — RFFA / subsidy line items
+--   - public.farmer_assets         — per-farmer planting-area lots + machinery
+--   - public.farmers               — farmer registry
+--   - public.households            — household groups
+--   - public.organizations         — coops / associations
+--   - public.profiles              — auth.user → role/barangay mapping
+--   - public.activity_logs         — audit history of mutations
+--   - public.app_errors            — error visibility log
+--
+-- INTENTIONALLY KEPT:
+--   - auth.users                   — login credentials. See "AUTH USERS"
+--                                    section below if you want them gone too.
+--   - All migrations / schema       — the structure itself stays.
 --
 -- USAGE
---   1. Run `pg_dump` FIRST — this is irreversible. See BACKUP_RUNBOOK.md §2.
---      One-liner:
+--   1. Run pg_dump FIRST. Irreversible otherwise.
 --        pg_dump "$AGRO_DB_URL" --no-owner --no-acl --schema=public \
 --          | gzip > "$HOME/agrodash-backups/pre-wipe-$(date -u +%Y-%m-%d_%H%M).sql.gz"
+--      For full safety include the auth schema too:
+--        pg_dump "$AGRO_DB_URL" --no-owner --no-acl --schema=public --schema=auth \
+--          | gzip > "$HOME/agrodash-backups/pre-wipe-with-auth-$(date -u +%Y-%m-%d_%H%M).sql.gz"
 --
---   2. Supabase Dashboard → SQL Editor → New query.
---      The SQL Editor runs with service-role credentials, so RLS is bypassed
---      and bulk deletes are permitted.
+--   2. Supabase Dashboard → SQL Editor → New query → paste this entire file
+--      → Run. The SQL Editor uses service-role credentials so RLS is bypassed.
 --
---   3. Paste this entire file. Click Run. Verify the output (see verification
---      block at the bottom — should report 0 for the six wiped tables).
+--   3. Verify (see queries at the bottom). All ten wiped tables should
+--      report 0 rows; auth.users should retain its row count.
 --
---   4. If the verification fails (any non-zero count), DO NOT proceed to the
---      pilot — investigate which delete didn't fire and why before retrying.
+--   4. NEXT STEP: run scripts/import-rsbsa.sql to load real farmer data
+--      from the SRBSA roster, then recreate pilot user accounts via
+--      Supabase Dashboard → Authentication.
+--
+-- AUTH USERS
+--   public.profiles has `id UUID PRIMARY KEY REFERENCES auth.users(id) ON
+--   DELETE CASCADE`. Deleting profiles does NOT delete auth.users — the
+--   FK only cascades the other direction. After this wipe, any existing
+--   auth.users become "orphaned": they can still authenticate, but the app
+--   will fail to look up their role/barangay because the profile row is
+--   gone, and the auto-profile trigger from migration 006 only fires on
+--   `AFTER INSERT ON auth.users`, NOT on subsequent logins.
+--
+--   To also delete auth.users (truly fresh start), uncomment the marked
+--   block in section 4 below. Profiles will cascade-delete automatically.
+--   You'll then need to recreate pilot accounts via Supabase Dashboard →
+--   Authentication → Add User, setting raw_user_meta_data → role
+--   (SUPER_ADMIN / ADMIN / BARANGAY_USER) and barangay so the
+--   auto-profile trigger populates the right values.
 --
 -- SAFETY
---   - Wrapped in a single transaction. If any DELETE errors out (e.g. an FK
---     constraint we forgot), the whole wipe is rolled back atomically.
---   - Order matters: child tables deleted before parents so we don't trip
---     FK constraints in the middle of the transaction.
---   - Soft-delete `deleted_at` columns are bypassed — we hard-delete because
---     we want them gone, not hidden.
---
--- AFTER THE WIPE
---   - activity_logs rows that reference now-deleted entity_ids become
---     orphans. They stay in the table (append-only by Phase Next design)
---     but the lookup `JOIN agri_records …` on them returns no row. The
---     summary text + actor + timestamp + before/after JSONB remain useful
---     for historical context. No corrective action needed.
---
---   - Sequences / auto-increment counters: none to reset. All entity IDs
---     are UUIDs (gen_random_uuid / uuid_generate_v4).
---
---   - VACUUM: not needed. Postgres autovacuum handles it; for a one-time
---     prod wipe of ≤1000 rows per table the disk-bloat impact is trivial.
---
--- ROLLBACK
---   Restore the pg_dump from step 1 into a fresh Supabase project, then
---   point the app at it via .env.local. See BACKUP_RUNBOOK.md §3 ("Real
---   recovery flow").
+--   Wrapped in a single transaction. If any DELETE errors out (e.g. FK
+--   constraint we missed), the whole wipe rolls back atomically.
 
 BEGIN;
 
--- 1) agri_records: references farmers (farmer_ids[]), households,
---    farmer_assets. Delete first so the parents can go.
+-- ─────────────────────────────────────────────────────────────────────
+-- 1) Entity data (child rows before parents).
+-- ─────────────────────────────────────────────────────────────────────
+
+-- agri_records references farmers, households, farmer_assets — first.
 DELETE FROM public.agri_records;
 
--- 2) farmer_organizations: references farmers + organizations. Delete
---    before farmers; organizations stay.
+-- farmer_organizations references farmers + organizations.
 DELETE FROM public.farmer_organizations;
 
--- 3) household_subsidies: references households. Delete before households.
+-- household_subsidies references households.
 DELETE FROM public.household_subsidies;
 
--- 4) farmer_assets: references farmers. Delete before farmers.
+-- farmer_assets references farmers.
 DELETE FROM public.farmer_assets;
 
--- 5) farmers: references households (ON DELETE SET NULL per migration 005),
---    so technically households could be deleted first — but order is clearer
---    this way and the SET NULL would still fire harmlessly.
+-- farmers references households (ON DELETE SET NULL).
 DELETE FROM public.farmers;
 
--- 6) households: no remaining FK references after the above.
+-- households — no remaining FK references after the above.
 DELETE FROM public.households;
+
+-- organizations — referenced by farmer_organizations (gone) +
+-- households.organization_id (ON DELETE SET NULL, harmless).
+DELETE FROM public.organizations;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 2) Audit history (append-only by design but the user wants a clean slate).
+-- ─────────────────────────────────────────────────────────────────────
+
+DELETE FROM public.activity_logs;
+DELETE FROM public.app_errors;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 3) Profiles (auth.user ↔ role/barangay mapping).
+-- ─────────────────────────────────────────────────────────────────────
+--   auth.users are kept. Existing auth.users will sign in but the app
+--   will not be able to look up their role/barangay until you either:
+--     (a) Re-INSERT into profiles manually (per user), OR
+--     (b) Run the backfill from migration 006 (after the wipe):
+--           INSERT INTO public.profiles (id, username, display_name, role, barangay)
+--           SELECT id, …, 'BARANGAY_USER', NULL FROM auth.users
+--           WHERE id NOT IN (SELECT id FROM public.profiles);
+--         then UPDATE role/barangay per user.
+
+DELETE FROM public.profiles;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 4) OPTIONAL: also delete auth.users (truly fresh start).
+-- ─────────────────────────────────────────────────────────────────────
+--   Uncomment if you want to nuke every login credential too. Profiles
+--   are already empty from step 3, so this just clears the auth-schema
+--   row that the trigger fires on. After this, ALL existing logins stop
+--   working — recreate users via Supabase Dashboard → Authentication →
+--   Add User.
+
+-- DELETE FROM auth.users;
 
 COMMIT;
 
 -- =========================================================================
--- Verification queries (run manually after the COMMIT above):
+-- Verification queries (run after COMMIT).
 -- =========================================================================
 --
--- Wiped tables — expect 0 rows each:
+-- Wiped — expect 0 for all ten:
 --
 --   SELECT 'agri_records'         AS t, count(*) FROM public.agri_records
 --   UNION ALL SELECT 'farmers',             count(*) FROM public.farmers
 --   UNION ALL SELECT 'households',          count(*) FROM public.households
 --   UNION ALL SELECT 'farmer_assets',       count(*) FROM public.farmer_assets
 --   UNION ALL SELECT 'farmer_organizations',count(*) FROM public.farmer_organizations
---   UNION ALL SELECT 'household_subsidies', count(*) FROM public.household_subsidies;
+--   UNION ALL SELECT 'household_subsidies', count(*) FROM public.household_subsidies
+--   UNION ALL SELECT 'organizations',       count(*) FROM public.organizations
+--   UNION ALL SELECT 'profiles',            count(*) FROM public.profiles
+--   UNION ALL SELECT 'activity_logs',       count(*) FROM public.activity_logs
+--   UNION ALL SELECT 'app_errors',          count(*) FROM public.app_errors;
 --
--- Kept tables — expect non-zero (sanity check that we didn't over-delete):
+-- Kept — sanity check the wipe didn't overshoot:
 --
---   SELECT 'organizations' AS t, count(*) FROM public.organizations
---   UNION ALL SELECT 'profiles',       count(*) FROM public.profiles
---   UNION ALL SELECT 'auth.users',     count(*) FROM auth.users
---   UNION ALL SELECT 'activity_logs',  count(*) FROM public.activity_logs
---   UNION ALL SELECT 'app_errors',     count(*) FROM public.app_errors;
+--   SELECT count(*) AS auth_users FROM auth.users;
+--   -- Expect non-zero unless you uncommented section 4.
 --
--- App-side smoke test after the wipe:
---   1. Reload the app in a browser tab where you're signed in. Each of the
---      Overview / Records / Farmers tabs should show empty states (the
---      EmptyState component from Week 2 will render appropriate copy).
---   2. Click "Register Farmer" → add a real farmer → save. Confirm the
---      farmer appears in the Farmers tab list (registry of 1).
---   3. Click "Add Record" → fill in a record for that farmer → save.
---      Confirm the record appears and the Overview tile updates.
---   4. Check Activity tab — there should be entries for the post-wipe
---      Add Farmer + Add Record actions (proves activity_logs still works).
+-- App-side smoke after running the import script:
+--   1. Sign in. If auth.users were kept but profiles wiped, you'll get a
+--      "no profile" symptom. Run the backfill SQL from above to fix.
+--   2. After running scripts/import-rsbsa.sql, the Farmers tab should
+--      show ~1100 farmers across 10 barangays (the unique-by-RSBSA count
+--      from the SRBSA roster — see the import script header for the
+--      exact post-dedup total).
