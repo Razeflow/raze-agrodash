@@ -29,8 +29,13 @@ export default function HouseholdBrowseDialog({
   const { mounted, visible } = useAnimatedMount(open);
   const [search, setSearch] = useState("");
 
-  if (!mounted) return null;
-
+  // Pre-pilot fix: keep useMemo above the early-return so React's hook
+  // call order stays stable across renders. Previously this useMemo sat
+  // after `if (!mounted) return null`, so on the first render (mounted
+  // false → early-exit, 2 hooks) vs. once mounted became true (3 hooks),
+  // React saw the hook count change mid-component-life and threw
+  // "Rendered more hooks than during the previous render". The route
+  // ErrorBoundary caught it, but the view was unusable.
   const filteredSorted = useMemo(() => {
     const q = normalizeSortKey(search);
     const filtered = !q
@@ -52,6 +57,8 @@ export default function HouseholdBrowseDialog({
         });
     return sortBy(filtered, (h) => h.display_name?.trim() || h.id);
   }, [households, farmers, getSubsidiesForHousehold, search]);
+
+  if (!mounted) return null;
 
   return (
     <DialogPortal>
